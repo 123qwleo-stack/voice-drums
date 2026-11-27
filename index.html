@@ -32,7 +32,8 @@ h1{font-size:20px;font-stretch:112%;font-weight:800;margin:0 0 18px;display:flex
 .empty{border:2px dashed var(--line);border-radius:10px;padding:28px;color:var(--mute);text-align:center}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 22px}
 .chip{border:1px solid var(--line);border-radius:999px;padding:6px 14px;font-size:15px;white-space:nowrap}
-.chip b{font-weight:700}
+.chip b{font-weight:700}.chip.ok{border-color:#1a9b5a;color:#1a9b5a;font-weight:700}.chip.warn{border-color:var(--red);color:var(--red);font-weight:700}
+#tapResume{position:fixed;left:16px;right:16px;bottom:16px;z-index:4;background:var(--red);color:#fff;border:0;min-height:60px;font-size:18px;border-radius:14px}
 .heard{border-top:3px solid var(--ink);padding-top:12px;margin-bottom:26px}
 .heard p{margin:2px 0}.q{font-size:19px;font-weight:600}.a{color:var(--mute)}
 .cols{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:28px}
@@ -52,6 +53,7 @@ button:focus-visible{outline:3px solid var(--red);outline-offset:2px}
 </style>
 </head>
 <body>
+<button id="tapResume" hidden>Voice paused. Tap to resume listening</button>
 <div id="gate"><div>
   <h2>Beatbox it. Say it. Hear it.</h2>
   <p>Tap once so the browser lets this page use your microphone. Everything after that is by voice. Headphones help a lot, because the mic won't hear the playback.</p>
@@ -65,7 +67,7 @@ button:focus-visible{outline:3px solid var(--red);outline-offset:2px}
   <p id="sub">Listening for commands.</p>
   <div class="meter" id="meterWrap" hidden><span id="meter"></span></div>
   <div class="grid" id="grid"></div>
-  <div class="chips" id="chips"></div>
+  <div class="chips"><span class="chip warn" id="voice">Voice: starting…</span><span id="chips" style="display:contents"></span></div>
   <div class="heard"><p class="q" id="heardQ">Nothing heard yet</p><p class="a" id="heardA">Try "record a beat", then "make it techno".</p></div>
   <div class="cols">
     <div>
@@ -457,7 +459,7 @@ async function capture(mode) {
   } catch (err) {
     closeMic(); say('Couldn\'t use the microphone', String(err.message || err)); chirp(false);
   }
-  S.busy = false; $('meterWrap').hidden = true; $('light').className = 'light'; resumeListen(); setStatus();
+  S.busy = false; $('meterWrap').hidden = true; $('light').className = 'light'; voice('restarting…', false); resumeListen(); setStatus();
 }
 let levelCb = null;
 function onLevel(d) {
@@ -522,16 +524,33 @@ function finishCapture(mode, hits, gridStart, beat) {
 
 /* ---------- speech ---------- */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
-function startListen() {
-  if (!SR) { $('srWarn').textContent = 'This browser has no speech recognition, so voice commands are off. Use Chrome, or use the backup buttons.'; return; }
-  rec = new SR(); rec.continuous = true; rec.interimResults = false; rec.lang = 'en-US';
-  rec.onresult = e => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) handle(e.results[i][0].transcript); };
-  rec.onend = () => { if (wantListen && !S.busy) setTimeout(() => { try { rec.start(); } catch {} }, 150); };
-  rec.onerror = e => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { wantListen = false; $('srWarn').textContent = 'Voice commands were blocked. Allow the microphone for this page, or open it in Chrome.'; } };
-  resumeListen();
+let recOn = false, needTap = false;
+function voice(txt, good) { $('voice').textContent = 'Voice: ' + txt; $('voice').className = 'chip ' + (good ? 'ok' : 'warn'); if (!S.busy) $('light').className = 'light' + (good ? ' listen' : ''); }
+function makeRec() {
+  const r = new SR(); r.continuous = true; r.interimResults = false; r.lang = 'en-US';
+  r.onstart = () => { if (r !== rec) return; recOn = true; voice('listening', true); };
+  r.onresult = e => { if (r !== rec) return; for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) handle(e.results[i][0].transcript); };
+  r.onerror = e => {
+    if (r !== rec || e.error === 'no-speech' || e.error === 'aborted') return;
+    voice('error: ' + e.error, false);
+    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { needTap = true; $('tapResume').hidden = false; }
+  };
+  r.onend = () => { if (r !== rec) return; recOn = false; if (wantListen && !S.busy && !needTap) { voice('restarting…', false); setTimeout(startRec, 300); } };
+  return r;
 }
-function pauseListen() { wantListen = false; if (rec) try { rec.abort(); } catch {} }
-function resumeListen() { if (!rec) return; wantListen = true; try { rec.start(); } catch {} if (!S.busy) $('light').className = 'light listen'; }
+function startRec() {
+  if (!SR || recOn || !wantListen || S.busy || needTap) return;
+  try { rec = makeRec(); rec.start(); } catch (err) { voice('couldn\'t start: ' + (err.message || err), false); }
+}
+function startListen() {
+  if (!SR) { $('srWarn').textContent = 'This browser has no speech recognition, so voice commands are off. Use Chrome, or use the backup buttons.'; $('voice').textContent = 'Voice: not supported'; return; }
+  resumeListen();
+  // watchdog: phones stop the recognizer on their own; keep bringing it back
+  setInterval(() => { if (wantListen && !S.busy && !recOn && !needTap) startRec(); }, 2500);
+}
+function pauseListen() { wantListen = false; recOn = false; const r = rec; rec = null; if (r) try { r.abort(); } catch {} }
+function resumeListen() { wantListen = true; setTimeout(startRec, 400); }
+function tapResume() { needTap = false; $('tapResume').hidden = true; wantListen = true; recOn = false; startRec(); }
 
 /* ---------- commands ---------- */
 function num(str) { const m = str.match(/\b(\d+)\b/); if (m) return +m[1]; for (const w of str.split(/\s+/)) if (NUM[w]) return NUM[w]; return null; }
@@ -590,7 +609,7 @@ function setStatus(a, b) {
   if (a) { $('status').textContent = a; $('sub').textContent = b || ''; return; }
   if (override) { $('status').textContent = override[0]; $('sub').textContent = override[1]; return; }
   if (P.on) { $('status').textContent = P.times ? `Playing, loop ${Math.min(P.loop, P.times)} of ${P.times}` : 'Playing on loop'; $('sub').textContent = `${KITS[S.kit].name} kit at ${S.bpm} BPM. Say "stop" anytime.`; }
-  else { $('status').textContent = S.pattern ? 'Say "play it" or "loop it 4 times"' : 'Say "record a beat"'; $('sub').textContent = wantListen ? 'Listening for commands.' : (rec ? 'Paused.' : 'Use the buttons below.'); }
+  else { $('status').textContent = S.pattern ? 'Say "play it" or "loop it 4 times"' : 'Say "record a beat"'; $('sub').textContent = recOn ? 'Listening for commands.' : 'If voice stops, tap anywhere on the page to wake it.'; }
 }
 function drawGrid(ph) {
   const g = $('grid');
@@ -613,6 +632,8 @@ $('go').addEventListener('click', async () => {
     $('gate').remove(); startListen(); setStatus();
   } catch (err) { $('gateMsg').textContent = 'The microphone was blocked: ' + (err.message || err) + '. Allow it in the browser\'s site settings and tap again.'; }
 });
+$('tapResume').addEventListener('click', tapResume);
+document.addEventListener('click', e => { if (ctx && !S.busy && !recOn && !e.target.closest('button')) tapResume(); });
 drawGrid(-1); drawChips();
 }
 </script>
