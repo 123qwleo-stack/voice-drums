@@ -1,0 +1,487 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Voice Drum Studio</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..800&display=swap">
+<style>
+/* VOICE: a studio tool you talk to — calm, confident, readable from across the room
+   IDEA: a hardware drum machine's step grid with a red record light
+   PICTURE: the live step grid with its moving playhead
+   COLOUR and TYPE: white / near-black ink / signal red; Archivo wide
+   LAYOUT: big status line, grid, then chips, last-heard, commands */
+:root{color-scheme:light dark;--bg:light-dark(#fff,#0e0e0f);--ink:light-dark(#121316,#f1f1f2);--mute:light-dark(#6a6d75,#9a9ca3);--line:light-dark(#e3e4e7,#2a2b2f);--cell:light-dark(#eef0f3,#1c1d21);--red:#e4002b;--k:light-dark(#121316,#f1f1f2);--s:#e4002b;--h:light-dark(#7a7f8a,#9aa0ab)}
+*{box-sizing:border-box;min-width:0}
+body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.5 Archivo,system-ui,sans-serif;overflow-x:clip}
+.wrap{max-width:1100px;margin:0 auto;padding:clamp(18px,4vw,44px) max(4vw,16px)}
+h1{font-size:20px;font-stretch:112%;font-weight:800;margin:0 0 18px;display:flex;align-items:center;gap:10px}
+.light{width:14px;height:14px;border-radius:50%;background:var(--line);flex:none}
+.light.on{background:var(--red);box-shadow:0 0 0 6px color-mix(in srgb,var(--red) 22%,transparent)}
+.light.listen{background:#1a9b5a}
+#status{font-size:clamp(30px,6vw,48px);line-height:1.05;font-weight:800;font-stretch:112%;margin:0 0 6px;text-wrap:balance}
+#sub{color:var(--mute);margin:0 0 22px;font-size:17px}
+.grid{display:grid;gap:14px;margin-bottom:22px}
+.bar{display:grid;grid-template-columns:44px repeat(16,minmax(0,1fr));gap:3px;align-items:center}
+.lab{font-size:13px;color:var(--mute);font-weight:600}
+.c{aspect-ratio:1/1.15;border-radius:4px;background:var(--cell)}
+.c.beat{outline:1px solid var(--line);outline-offset:-1px}
+.c.on-k{background:var(--k)}.c.on-s{background:var(--s)}.c.on-h{background:var(--h)}
+.c.ph{box-shadow:inset 0 0 0 3px #1a9b5a}
+.empty{border:2px dashed var(--line);border-radius:10px;padding:28px;color:var(--mute);text-align:center}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 22px}
+.chip{border:1px solid var(--line);border-radius:999px;padding:6px 14px;font-size:15px;white-space:nowrap}
+.chip b{font-weight:700}
+.heard{border-top:3px solid var(--ink);padding-top:12px;margin-bottom:26px}
+.heard p{margin:2px 0}.q{font-size:19px;font-weight:600}.a{color:var(--mute)}
+.cols{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:28px}
+h2{font-size:17px;font-weight:800;margin:0 0 8px}
+.cmds{margin:0;padding:0;list-style:none}.cmds li{padding:7px 0;border-bottom:1px solid var(--line)}
+.cmds em{font-style:normal;font-weight:700}
+.btns{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
+button{font:inherit;font-weight:700;min-height:44px;padding:0 16px;border-radius:8px;border:1px solid var(--line);background:var(--cell);color:var(--ink);cursor:pointer}
+button:focus-visible{outline:3px solid var(--red);outline-offset:2px}
+.tips{font-size:15px;color:var(--mute)}.tips p{margin:0 0 8px}
+#gate{position:fixed;inset:0;background:var(--bg);display:grid;place-items:center;padding:24px;z-index:5;text-align:center}
+#gate h2{font-size:clamp(30px,6vw,46px);line-height:1.05;font-stretch:112%;margin:0 0 12px}
+#gate p{color:var(--mute);max-width:34em;margin:0 auto 22px}
+#go{background:var(--red);color:#fff;border:0;font-size:20px;min-height:64px;padding:0 34px;border-radius:999px}
+@media(max-width:700px){.cols{grid-template-columns:1fr}.bar{grid-template-columns:30px repeat(16,minmax(0,1fr));gap:2px}}
+@media(prefers-reduced-motion:reduce){.light.on{box-shadow:none}}
+</style>
+</head>
+<body>
+<div id="gate"><div>
+  <h2>Beatbox it. Say it. Hear it.</h2>
+  <p>Tap once so the browser lets this page use your microphone. Everything after that is by voice. Headphones help a lot, because the mic won't hear the playback.</p>
+  <button id="go">Tap to start</button>
+  <p id="gateMsg" style="margin-top:18px"></p>
+</div></div>
+
+<div class="wrap">
+  <h1><span class="light" id="light"></span>Voice Drum Studio</h1>
+  <p id="status">Say "record a beat"</p>
+  <p id="sub">Listening for commands.</p>
+  <div class="grid" id="grid"></div>
+  <div class="chips" id="chips"></div>
+  <div class="heard"><p class="q" id="heardQ">Nothing heard yet</p><p class="a" id="heardA">Try "record a beat", then "make it techno".</p></div>
+  <div class="cols">
+    <div>
+      <h2>Things you can say</h2>
+      <ul class="cmds">
+        <li><em>"Record a beat"</em>: four clicks count you in, then beatbox for the set number of bars</li>
+        <li><em>"Play it"</em> / <em>"Loop it 4 times"</em> / <em>"Stop"</em></li>
+        <li><em>"Make it techno"</em>: also trap, 808, house, lo-fi, rock, real or acoustic</li>
+        <li><em>"Tempo 120"</em> / <em>"Faster"</em> / <em>"Slower"</em> / <em>"Four bars"</em></li>
+        <li><em>"Add hi-hats"</em> / <em>"Remove snares"</em> / <em>"Double it"</em> / <em>"Add swing"</em></li>
+        <li><em>"Undo"</em> / <em>"Clear"</em> / <em>"Click off"</em></li>
+        <li><em>"Teach kick"</em> (also snare, hi-hat): do that sound four times so it learns your mouth</li>
+        <li><em>"Calibrate"</em>: say "ta" on each click for 2 bars to fix timing</li>
+      </ul>
+    </div>
+    <div>
+      <h2>Backup buttons</h2>
+      <div class="btns"><button data-cmd="record a beat">Record</button><button data-cmd="play">Play</button><button data-cmd="stop">Stop</button><button data-cmd="undo">Undo</button></div>
+      <div class="tips">
+        <p>Beatbox sounds: <b>"b" / "boom"</b> for kick, <b>"k" / "pf"</b> for snare, <b>"ts"</b> for hi-hat. Wrong drums? Say "teach kick", "teach snare" and "teach hi-hat" once each.</p>
+        <p>Best in Chrome on a computer. Voice commands need Chrome or Edge, and Safari works partly.</p>
+        <p id="srWarn"></p>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+/* DSP: onset detection, sound classification, quantizing */
+const DSP = (() => {
+  function fft(re, im) {
+    const n = re.length;
+    for (let i = 1, j = 0; i < n; i++) {
+      let bit = n >> 1;
+      for (; j & bit; bit >>= 1) j ^= bit;
+      j ^= bit;
+      if (i < j) { let t = re[i]; re[i] = re[j]; re[j] = t; t = im[i]; im[i] = im[j]; im[j] = t; }
+    }
+    for (let len = 2; len <= n; len <<= 1) {
+      const ang = -2 * Math.PI / len, wr = Math.cos(ang), wi = Math.sin(ang), half = len >> 1;
+      for (let i = 0; i < n; i += len) {
+        let cr = 1, ci = 0;
+        for (let k = 0; k < half; k++) {
+          const a = i + k, b = a + half;
+          const tr = re[b] * cr - im[b] * ci, ti = re[b] * ci + im[b] * cr;
+          re[b] = re[a] - tr; im[b] = im[a] - ti; re[a] += tr; im[a] += ti;
+          const ncr = cr * wr - ci * wi; ci = cr * wi + ci * wr; cr = ncr;
+        }
+      }
+    }
+  }
+  const hannCache = {};
+  function hann(N) {
+    if (!hannCache[N]) { const w = new Float32Array(N); for (let i = 0; i < N; i++) w[i] = 0.5 - 0.5 * Math.cos(2 * Math.PI * i / (N - 1)); hannCache[N] = w; }
+    return hannCache[N];
+  }
+  function power(x, start, N) {
+    const re = new Float64Array(N), im = new Float64Array(N), w = hann(N);
+    for (let i = 0; i < N; i++) { const s = start + i; re[i] = (s >= 0 && s < x.length ? x[s] : 0) * w[i]; }
+    fft(re, im);
+    const p = new Float64Array(N / 2);
+    for (let i = 0; i < N / 2; i++) p[i] = re[i] * re[i] + im[i] * im[i];
+    return p;
+  }
+
+  // Returns [{t (seconds into buffer), level}]
+  function detectOnsets(x, sr, opts = {}) {
+    const N = 1024, H = 256, minGap = (opts.minGapMs || 70) / 1000;
+    const frames = Math.max(0, Math.floor((x.length - N) / H));
+    const flux = new Float64Array(frames), rms = new Float64Array(frames);
+    let prev = null, peakRms = 0;
+    for (let f = 0; f < frames; f++) {
+      const st = f * H;
+      let e = 0; for (let i = 0; i < N; i++) e += x[st + i] * x[st + i];
+      rms[f] = Math.sqrt(e / N); if (rms[f] > peakRms) peakRms = rms[f];
+      const p = power(x, st, N), m = new Float64Array(p.length);
+      let fl = 0;
+      for (let i = 1; i < p.length; i++) { m[i] = Math.log1p(1000 * Math.sqrt(p[i])); if (prev) { const d = m[i] - prev[i]; if (d > 0) fl += d; } }
+      flux[f] = prev ? fl : 0; prev = m;
+    }
+    const gate = Math.max(peakRms * Math.pow(10, -32 / 20), 0.002);
+    let meanFlux = 0; for (let f = 0; f < frames; f++) meanFlux += flux[f]; meanFlux /= Math.max(1, frames);
+    const out = []; let last = -1e9;
+    for (let f = 1; f < frames - 1; f++) {
+      let lm = 0, c = 0;
+      for (let j = Math.max(0, f - 12); j <= Math.min(frames - 1, f + 12); j++) { lm += flux[j]; c++; }
+      lm /= c;
+      const thr = lm * 1.4 + meanFlux * 0.5;
+      if (flux[f] > thr && flux[f] >= flux[f - 1] && flux[f] >= flux[f + 1]) {
+        let lv = 0; for (let j = f; j < Math.min(frames, f + 6); j++) lv = Math.max(lv, rms[j]);
+        if (lv < gate) continue;
+        const t = (f * H + N / 2) / sr;
+        if (t - last < minGap) { if (out.length && lv > out[out.length - 1].level) { out[out.length - 1].level = lv; } continue; }
+        out.push({ t, level: lv }); last = t;
+      }
+    }
+    return out;
+  }
+
+  function features(x, sr, t) {
+    const N = 2048, st = Math.round(t * sr) - 384;
+    const p = power(x, st, N), bin = sr / N;
+    let tot = 0, cen = 0, low = 0, high = 0;
+    for (let i = 1; i < p.length; i++) {
+      const f = i * bin; tot += p[i]; cen += f * p[i];
+      if (f < 250) low += p[i]; if (f > 4000) high += p[i];
+    }
+    tot = tot || 1e-12;
+    return { centroid: cen / tot, low: low / tot, high: high / tot };
+  }
+  const vec = (f) => [Math.log2(Math.max(50, f.centroid)), f.low * 3, f.high * 3];
+
+  // model: {k:[...], s:[...], h:[...]} trained mean vectors (optional)
+  function classify(f, model) {
+    if (model && model.k && model.s && model.h) {
+      const v = vec(f); let best = 'k', bd = Infinity;
+      for (const key of ['k', 's', 'h']) {
+        const m = model[key]; let d = 0; for (let i = 0; i < 3; i++) d += (v[i] - m[i]) ** 2;
+        if (d < bd) { bd = d; best = key; }
+      }
+      return best;
+    }
+    if (f.low > 0.3 || f.centroid < 800) return 'k';
+    if (f.high > 0.45 || f.centroid > 4200) return 'h';
+    return 's';
+  }
+
+  function analyze(x, sr, model) {
+    return detectOnsets(x, sr).map(o => { const f = features(x, sr, o.t); return { ...o, f, type: classify(f, model) }; });
+  }
+
+  // hits: [{time (absolute), type, level}] -> pattern of steps
+  function quantize(hits, gridStart, stepDur, steps, latency) {
+    const pat = Array.from({ length: steps }, () => ({ k: 0, s: 0, h: 0 }));
+    const maxL = Math.max(1e-9, ...hits.map(h => h.level));
+    let used = 0;
+    for (const h of hits) {
+      const rel = h.time - gridStart - latency;
+      const idx = Math.round(rel / stepDur);
+      if (idx < 0 || idx >= steps) continue;
+      const vel = 0.45 + 0.55 * Math.min(1, h.level / maxL);
+      if (vel > pat[idx][h.type]) pat[idx][h.type] = Math.round(vel * 100) / 100;
+      used++;
+    }
+    return { pat, used };
+  }
+
+  function trainMean(fs) {
+    if (!fs.length) return null;
+    const m = [0, 0, 0]; for (const f of fs) { const v = vec(f); for (let i = 0; i < 3; i++) m[i] += v[i] / fs.length; }
+    return m;
+  }
+
+  // median offset of hits to nearest beat
+  function beatOffset(times, gridStart, beat) {
+    const offs = times.map(t => { const r = t - gridStart; return r - Math.round(r / beat) * beat; }).sort((a, b) => a - b);
+    return offs.length ? offs[Math.floor(offs.length / 2)] : 0;
+  }
+
+  return { detectOnsets, features, classify, analyze, quantize, trainMean, beatOffset };
+})();
+
+
+</script>
+<script>
+{
+const $ = id => document.getElementById(id);
+const store = { get(k, d) { try { const v = localStorage.getItem('vds_' + k); return v ? JSON.parse(v) : d; } catch { return d; } }, set(k, v) { try { localStorage.setItem('vds_' + k, JSON.stringify(v)); } catch {} } };
+
+const KITS = {
+  acoustic: { name: 'Acoustic', kf0: 130, kf1: 52, kSw: .06, kDec: .42, kG: 1, kClick: .3, sTone: 190, sMix: .6, sHp: 1200, sDec: .22, clap: false, hBase: 44, hHp: 6500, hDec: .06, hG: .35, lp: 16000, drive: 0, rev: .25 },
+  techno: { name: 'Techno', kf0: 165, kf1: 45, kSw: .09, kDec: .55, kG: 1.1, kClick: .35, sTone: 220, sMix: .3, sHp: 1800, sDec: .18, clap: true, hBase: 40, hHp: 8000, hDec: .04, hG: .3, lp: 14000, drive: .6, rev: .32 },
+  trap: { name: 'Trap 808', kf0: 110, kf1: 42, kSw: .12, kDec: 1.1, kG: 1.1, kClick: .1, sTone: 200, sMix: .2, sHp: 1500, sDec: .25, clap: true, hBase: 46, hHp: 9000, hDec: .03, hG: .3, lp: 18000, drive: .3, rev: .15 },
+  lofi: { name: 'Lo-fi', kf0: 100, kf1: 50, kSw: .05, kDec: .3, kG: 1, kClick: .1, sTone: 180, sMix: .5, sHp: 900, sDec: .16, clap: false, hBase: 42, hHp: 5000, hDec: .05, hG: .25, lp: 4500, drive: .4, rev: .25 },
+  house: { name: 'House', kf0: 140, kf1: 50, kSw: .07, kDec: .4, kG: 1, kClick: .25, sTone: 200, sMix: .3, sHp: 1500, sDec: .2, clap: true, hBase: 40, hHp: 7500, hDec: .09, hG: .3, lp: 15000, drive: .2, rev: .28 }
+};
+const KIT_WORDS = [[/techno|industrial|rave|berlin/, 'techno'], [/trap|808|hip ?hop|drill/, 'trap'], [/lo ?-?fi|chill|jazz|dusty|vintage/, 'lofi'], [/house|disco|dance|club/, 'house'], [/acoustic|real|rock|live|natural|normal/, 'acoustic']];
+const NUM = { one: 1, two: 2, to: 2, too: 2, three: 3, four: 4, for: 4, five: 5, six: 6, eight: 8, ten: 10, sixteen: 16, once: 1, twice: 2 };
+
+const S = { bpm: store.get('bpm', 100), bars: store.get('bars', 2), kit: store.get('kit', 'acoustic'), swing: false, click: true, latency: store.get('latency', 0.03), model: store.get('model', {}), pattern: null, hist: [], busy: false };
+
+let ctx, bus, lp, shaper, comp, revSend, noiseBuf, micStream = null;
+let rec = null, wantListen = false;
+
+/* ---------- audio engine ---------- */
+function initAudio() {
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+  comp = ctx.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
+  const master = ctx.createGain(); master.gain.value = .85; comp.connect(master); master.connect(ctx.destination);
+  bus = ctx.createGain(); lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; shaper = ctx.createWaveShaper();
+  bus.connect(lp); lp.connect(shaper); shaper.connect(comp);
+  const conv = ctx.createConvolver(), L = ctx.sampleRate * 1.8, ir = ctx.createBuffer(2, L, ctx.sampleRate);
+  for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < L; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / L, 3.5); }
+  conv.buffer = ir; revSend = ctx.createGain(); bus.connect(revSend); revSend.connect(conv); conv.connect(comp);
+  noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
+  const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  applyKit();
+}
+function applyKit() {
+  const K = KITS[S.kit]; lp.frequency.value = K.lp; revSend.gain.value = K.rev;
+  const k = K.drive * 40, n = 1024, c = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = k ? (1 + k) * x / (1 + k * Math.abs(x)) / (1 + k * .15) : x; }
+  shaper.curve = c;
+}
+function env(g, t, peak, dec, att = .001) { g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(Math.max(.0002, peak), t + att); g.gain.exponentialRampToValueAtTime(.0001, t + att + dec); }
+function noise(t, dur, dest) { const s = ctx.createBufferSource(); s.buffer = noiseBuf; s.connect(dest); s.start(t, Math.random() * .5); s.stop(t + dur); }
+function kick(t, v, K) {
+  const o = ctx.createOscillator(), g = ctx.createGain(); o.connect(g); g.connect(bus);
+  o.frequency.setValueAtTime(K.kf0, t); o.frequency.exponentialRampToValueAtTime(K.kf1, t + K.kSw);
+  env(g, t, v * K.kG, K.kDec); o.start(t); o.stop(t + K.kDec + .05);
+  const hp = ctx.createBiquadFilter(), cg = ctx.createGain(); hp.type = 'highpass'; hp.frequency.value = 3000; hp.connect(cg); cg.connect(bus);
+  env(cg, t, v * K.kClick, .012); noise(t, .03, hp);
+}
+function snare(t, v, K) {
+  const bp = ctx.createBiquadFilter(), g = ctx.createGain(); bp.type = K.clap ? 'bandpass' : 'highpass'; bp.frequency.value = K.clap ? 1400 : K.sHp; bp.Q.value = K.clap ? 1.2 : .7;
+  bp.connect(g); g.connect(bus);
+  if (K.clap) { g.gain.setValueAtTime(.0001, t); for (let i = 0; i < 3; i++) { g.gain.exponentialRampToValueAtTime(v * .9, t + i * .011 + .001); g.gain.exponentialRampToValueAtTime(v * .15, t + i * .011 + .009); } g.gain.exponentialRampToValueAtTime(.0001, t + .035 + K.sDec); }
+  else env(g, t, v * .8, K.sDec);
+  noise(t, K.sDec + .06, bp);
+  if (K.sMix) { const o = ctx.createOscillator(), og = ctx.createGain(); o.type = 'triangle'; o.frequency.setValueAtTime(K.sTone * 1.4, t); o.frequency.exponentialRampToValueAtTime(K.sTone, t + .03); o.connect(og); og.connect(bus); env(og, t, v * K.sMix, .1); o.start(t); o.stop(t + .15); }
+}
+function hat(t, v, K) {
+  const bp = ctx.createBiquadFilter(), hp = ctx.createBiquadFilter(), g = ctx.createGain();
+  bp.type = 'bandpass'; bp.frequency.value = 10000; hp.type = 'highpass'; hp.frequency.value = K.hHp; bp.connect(hp); hp.connect(g); g.connect(bus);
+  for (const r of [2, 3, 4.16, 5.43, 6.79, 8.21]) { const o = ctx.createOscillator(); o.type = 'square'; o.frequency.value = K.hBase * r; o.connect(bp); o.start(t); o.stop(t + K.hDec + .05); }
+  env(g, t, v * K.hG, K.hDec);
+}
+function click(t, accent, vol = 1) {
+  const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = accent ? 1500 : 1000; o.connect(g); g.connect(ctx.destination);
+  env(g, t, .35 * vol, .05); o.start(t); o.stop(t + .08);
+}
+function chirp(ok) {
+  if (!ctx) return; const t = ctx.currentTime + .01, o = ctx.createOscillator(), g = ctx.createGain(); o.connect(g); g.connect(ctx.destination);
+  o.frequency.setValueAtTime(ok ? 660 : 330, t); o.frequency.setValueAtTime(ok ? 990 : 250, t + .07); env(g, t, .12, .14); o.start(t); o.stop(t + .2);
+}
+const stepDur = () => 60 / S.bpm / 4;
+
+/* ---------- playback ---------- */
+const P = { on: false, timer: 0, next: 0, idx: 0, loop: 1, times: 0, stopAt: 0, q: [] };
+function play(times = 0) {
+  if (!S.pattern) { say('Nothing to play yet', 'Say "record a beat" first.'); return false; }
+  stopPlay(); ctx.resume();
+  Object.assign(P, { on: true, next: ctx.currentTime + .08, idx: 0, loop: 1, times, stopAt: 0, q: [] });
+  P.timer = setInterval(tick, 25); tick(); requestAnimationFrame(drawHead); return true;
+}
+function tick() {
+  const K = KITS[S.kit], sd = stepDur();
+  if (P.stopAt && ctx.currentTime >= P.stopAt) { stopPlay(); setStatus(); return; }
+  while (!P.stopAt && P.next < ctx.currentTime + .12) {
+    const st = S.pattern[P.idx], t = P.next + (S.swing && P.idx % 2 ? sd * .28 : 0);
+    if (st.k) kick(t, st.k, K); if (st.s) snare(t, st.s, K); if (st.h) hat(t, st.h, K);
+    P.q.push({ i: P.idx, t });
+    P.idx++; P.next += sd;
+    if (P.idx >= S.pattern.length) { P.idx = 0; P.loop++; if (P.times && P.loop > P.times) P.stopAt = P.next + .3; }
+  }
+  setStatus();
+}
+function stopPlay() { clearInterval(P.timer); P.on = false; P.q = []; drawGrid(-1); }
+let lastHead = -2;
+function drawHead() {
+  if (!P.on) return;
+  let cur = -1; while (P.q.length && P.q[0].t <= ctx.currentTime) cur = P.q.shift().i;
+  if (cur >= 0 && cur !== lastHead) { lastHead = cur; drawGrid(cur); }
+  requestAnimationFrame(drawHead);
+}
+
+/* ---------- recording ---------- */
+const wait = ms => new Promise(r => setTimeout(r, ms));
+async function openMic() {
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false } });
+}
+function closeMic() { if (micStream) micStream.getTracks().forEach(t => t.stop()); micStream = null; }
+
+// mode: 'beat' | 'calibrate' | 'k' | 's' | 'h'
+async function capture(mode) {
+  S.busy = true; stopPlay(); pauseListen(); $('light').className = 'light on';
+  try {
+    await ctx.resume(); await openMic();
+    const src = ctx.createMediaStreamSource(micStream), proc = ctx.createScriptProcessor(2048, 1, 1), sink = ctx.createGain();
+    sink.gain.value = 0; src.connect(proc); proc.connect(sink); sink.connect(ctx.destination);
+    const chunks = []; let first = null;
+    proc.onaudioprocess = e => { if (first === null) first = ctx.currentTime - e.inputBuffer.duration; chunks.push(new Float32Array(e.inputBuffer.getChannelData(0))); };
+    const beat = 60 / S.bpm, train = mode.length === 1;
+    const bars = mode === 'beat' ? S.bars : mode === 'calibrate' ? 2 : 0;
+    const t0 = ctx.currentTime + .35, gridStart = t0 + 4 * beat;
+    const end = train ? t0 + .2 + 3.2 : gridStart + bars * 4 * beat + .3;
+    if (train) click(t0, true);
+    else {
+      for (let i = 0; i < 4; i++) click(t0 + i * beat, i === 0);
+      if (S.click || mode === 'calibrate') for (let i = 0; i < bars * 4; i++) click(gridStart + i * beat, i % 4 === 0, .45);
+    }
+    const names = { k: 'kick', s: 'snare', h: 'hi-hat' };
+    while (ctx.currentTime < end) {
+      const now = ctx.currentTime;
+      if (train) setStatus(now < t0 ? 'Get ready…' : `Do your ${names[mode]} sound 4 times`, 'Leave a little gap between each one.');
+      else if (now < gridStart) setStatus(now < t0 ? 'Get ready…' : `${4 - Math.floor((now - t0) / beat)}…`, mode === 'calibrate' ? 'Then say "ta" right on each click.' : 'Start beatboxing on the next "1".');
+      else { const b = Math.min(bars, Math.floor((now - gridStart) / (4 * beat)) + 1); setStatus(mode === 'calibrate' ? 'Say "ta" on every click' : `Recording bar ${b} of ${bars}`, 'Keep going…'); }
+      await wait(50);
+    }
+    proc.disconnect(); src.disconnect(); closeMic();
+    const total = chunks.reduce((a, c) => a + c.length, 0), x = new Float32Array(total); let o = 0; for (const c of chunks) { x.set(c, o); o += c.length; }
+    const hits = DSP.analyze(x, ctx.sampleRate, S.model).map(h => ({ ...h, time: first + h.t }));
+    finishCapture(mode, hits, gridStart, beat);
+  } catch (err) {
+    closeMic(); say('Couldn\'t use the microphone', String(err.message || err)); chirp(false);
+  }
+  S.busy = false; $('light').className = 'light'; resumeListen(); setStatus();
+}
+function finishCapture(mode, hits, gridStart, beat) {
+  if (mode === 'calibrate') {
+    const near = hits.filter(h => h.time > gridStart - beat / 2);
+    if (near.length < 4) { say('Calibration didn\'t catch enough', 'Try "calibrate" again a little louder.'); chirp(false); return; }
+    S.latency = Math.max(-.1, Math.min(.25, DSP.beatOffset(near.map(h => h.time), gridStart, beat))); store.set('latency', S.latency);
+    say('Timing calibrated', `Offset set to ${Math.round(S.latency * 1000)} ms.`); chirp(true); return;
+  }
+  if (mode.length === 1) {
+    if (hits.length < 2) { say('I didn\'t hear enough', 'Try again a little louder.'); chirp(false); return; }
+    S.model[mode] = DSP.trainMean(hits.map(h => h.f)); store.set('model', S.model);
+    const left = ['k', 's', 'h'].filter(k => !S.model[k]).map(k => ({ k: 'kick', s: 'snare', h: 'hi-hat' })[k]);
+    say(`Learned your ${({ k: 'kick', s: 'snare', h: 'hi-hat' })[mode]} from ${hits.length} hits`, left.length ? `Now teach ${left.join(' and ')}. It uses what it learned once all three are taught.` : 'All three sounds learned.'); chirp(true); return;
+  }
+  const steps = S.bars * 16, { pat, used } = DSP.quantize(hits, gridStart, stepDur(), steps, S.latency);
+  if (!used) { say('I didn\'t hear a beat', 'Get closer to the mic and try "record a beat" again.'); chirp(false); return; }
+  pushHist(); S.pattern = pat; drawGrid(-1);
+  const c = t => pat.filter(p => p[t]).length;
+  say(`Got it: ${c('k')} kicks, ${c('s')} snares, ${c('h')} hi-hats`, 'Playing it back. Say "stop", "make it techno", or "record a beat" to redo.');
+  chirp(true); play(0);
+}
+
+/* ---------- speech ---------- */
+const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
+function startListen() {
+  if (!SR) { $('srWarn').textContent = 'This browser has no speech recognition, so voice commands are off. Use Chrome, or use the backup buttons.'; return; }
+  rec = new SR(); rec.continuous = true; rec.interimResults = false; rec.lang = 'en-US';
+  rec.onresult = e => { for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) handle(e.results[i][0].transcript); };
+  rec.onend = () => { if (wantListen && !S.busy) setTimeout(() => { try { rec.start(); } catch {} }, 150); };
+  rec.onerror = e => { if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { wantListen = false; $('srWarn').textContent = 'Voice commands were blocked. Allow the microphone for this page, or open it in Chrome.'; } };
+  resumeListen();
+}
+function pauseListen() { wantListen = false; if (rec) try { rec.abort(); } catch {} }
+function resumeListen() { if (!rec) return; wantListen = true; try { rec.start(); } catch {} if (!S.busy) $('light').className = 'light listen'; }
+
+/* ---------- commands ---------- */
+function num(str) { const m = str.match(/\b(\d+)\b/); if (m) return +m[1]; for (const w of str.split(/\s+/)) if (NUM[w]) return NUM[w]; return null; }
+function pushHist() { S.hist.push(JSON.stringify(S.pattern)); if (S.hist.length > 30) S.hist.shift(); }
+const INST = [[/kick|kik|bass drum/, 'k'], [/snare|snair|clap/, 's'], [/hi ?-?hat|high ?hat|hats?\b/, 'h']];
+function inst(t) { for (const [r, k] of INST) if (r.test(t)) return k; return null; }
+
+function handle(raw) {
+  const t = raw.toLowerCase().replace(/[.,!?]/g, '').trim();
+  if (!t || S.busy) return;
+  $('heardQ').textContent = `"${raw.trim()}"`;
+  const r = interpret(t);
+  if (r) { $('heardA').textContent = r; chirp(true); } else { $('heardA').textContent = 'Didn\'t catch a command there. Try "play", "stop", or "make it techno".'; }
+  setStatus(); drawChips();
+}
+function interpret(t) {
+  let m, i;
+  if (/\b(teach|train|learn)\b/.test(t) && (i = inst(t))) { capture(i); return 'Teaching mode'; }
+  if (/calibrat|fix (the )?timing/.test(t)) { capture('calibrate'); return 'Calibrating timing'; }
+  if (/\b(record|new beat|take|redo|again from scratch)\b/.test(t)) { capture('beat'); return 'Recording: count-in starting'; }
+  if (/\b(stop|pause|quiet|silence|shut up|enough)\b/.test(t)) { stopPlay(); return 'Stopped'; }
+  if (/\bundo\b|go back/.test(t)) { if (!S.hist.length) return 'Nothing to undo'; S.pattern = JSON.parse(S.hist.pop()); drawGrid(-1); return 'Undone'; }
+  if (/\b(clear|start over|delete everything|wipe)\b/.test(t)) { pushHist(); S.pattern = null; stopPlay(); drawGrid(-1); return 'Cleared'; }
+  for (const [re, k] of KIT_WORDS) if (re.test(t) && /sound|make|kit|drums|switch|use|like|change|try|go/.test(t) || (re.test(t) && t.split(' ').length <= 2)) { S.kit = k; store.set('kit', k); applyKit(); if (S.pattern && !P.on) play(0); return `Switched to the ${KITS[k].name} kit`; }
+  if ((m = t.match(/(tempo|bpm|speed)\D*(\d+)/)) || (m = t.match(/(\d+)\s*(bpm|beats per minute)/))) {
+    const v = +(m[2] && /\d/.test(m[2]) ? m[2] : m[1]); S.bpm = Math.max(50, Math.min(200, v)); store.set('bpm', S.bpm); return `Tempo ${S.bpm} BPM`; }
+  if (/\b(faster|speed up|quicker)\b/.test(t)) { S.bpm = Math.min(200, S.bpm + 10); store.set('bpm', S.bpm); return `Tempo ${S.bpm} BPM`; }
+  if (/\b(slower|slow down)\b/.test(t)) { S.bpm = Math.max(50, S.bpm - 10); store.set('bpm', S.bpm); return `Tempo ${S.bpm} BPM`; }
+  if (/\bdouble (it|the)\b|twice as long/.test(t)) { if (!S.pattern) return 'Nothing to double yet'; pushHist(); S.pattern = S.pattern.concat(JSON.parse(JSON.stringify(S.pattern))); drawGrid(-1); return `Doubled to ${S.pattern.length / 16} bars`; }
+  if (/\bbars?\b/.test(t) && (m = num(t))) { S.bars = [1, 2, 4, 8].includes(m) ? m : 2; store.set('bars', S.bars); return `Next recording will be ${S.bars} bar${S.bars > 1 ? 's' : ''}`; }
+  if (/no swing|straight|remove (the )?swing/.test(t)) { S.swing = false; return 'Swing off'; }
+  if (/swing|shuffle|groove/.test(t)) { S.swing = true; return 'Swing on'; }
+  if (/(click|metronome)/.test(t)) { S.click = !/off|no|stop|without/.test(t); return `Click during recording ${S.click ? 'on' : 'off'}`; }
+  if (/\b(remove|delete|drop|no|mute|take out|get rid of)\b/.test(t) && (i = inst(t))) { if (!S.pattern) return 'Nothing recorded yet'; pushHist(); S.pattern.forEach(p => p[i] = 0); drawGrid(-1); return 'Removed'; }
+  if (/\b(add|more|put in|fill)\b/.test(t) && (i = inst(t))) {
+    if (!S.pattern) return 'Record a beat first'; pushHist();
+    S.pattern.forEach((p, n) => { if (i === 'h' && n % 2 === 0 && !p.h) p.h = .6; if (i === 'k' && n % 4 === 0 && !p.k) p.k = .8; if (i === 's' && n % 8 === 4 && !p.s) p.s = .85; });
+    drawGrid(-1); if (!P.on) play(0); return 'Added';
+  }
+  if (/\b(loop|repeat)\b/.test(t)) { const n = num(t); if (/forever|keep/.test(t) || !n) { return play(0) ? 'Looping until you say stop' : 'Nothing to loop yet'; } return play(n) ? `Looping ${n} time${n > 1 ? 's' : ''}` : 'Nothing to loop yet'; }
+  if (/\b(play|start|hear|listen|go)\b/.test(t)) { return play(0) ? 'Playing' : 'Nothing to play yet'; }
+  if (/help|what can i say/.test(t)) return 'The command list is below on the page.';
+  return null;
+}
+
+/* ---------- UI ---------- */
+let override = null;
+function say(a, b) { override = [a, b]; $('heardA').textContent = b; setTimeout(() => { override = null; setStatus(); }, 4000); setStatus(); }
+function setStatus(a, b) {
+  if (a) { $('status').textContent = a; $('sub').textContent = b || ''; return; }
+  if (override) { $('status').textContent = override[0]; $('sub').textContent = override[1]; return; }
+  if (P.on) { $('status').textContent = P.times ? `Playing, loop ${Math.min(P.loop, P.times)} of ${P.times}` : 'Playing on loop'; $('sub').textContent = `${KITS[S.kit].name} kit at ${S.bpm} BPM. Say "stop" anytime.`; }
+  else { $('status').textContent = S.pattern ? 'Say "play it" or "loop it 4 times"' : 'Say "record a beat"'; $('sub').textContent = wantListen ? 'Listening for commands.' : (rec ? 'Paused.' : 'Use the buttons below.'); }
+}
+function drawGrid(ph) {
+  const g = $('grid');
+  if (!S.pattern) { g.innerHTML = '<div class="empty">Your beat shows up here once you record one.</div>'; return; }
+  const rows = [['k', 'Kick'], ['s', 'Snare'], ['h', 'Hat']]; let html = '';
+  for (let b = 0; b < S.pattern.length / 16; b++) {
+    html += '<div>' + rows.map(([k, n]) => `<div class="bar"><span class="lab">${b === 0 ? n : ''}</span>` +
+      Array.from({ length: 16 }, (_, j) => { const i = b * 16 + j, p = S.pattern[i]; return `<span class="c${j % 4 ? '' : ' beat'}${p[k] ? ' on-' + k : ''}${i === ph ? ' ph' : ''}" style="${p[k] ? 'opacity:' + (.4 + p[k] * .6) : ''}"></span>`; }).join('') + '</div>').join('') + '</div>';
+  }
+  g.innerHTML = html;
+}
+function drawChips() {
+  const items = [['Kit', KITS[S.kit].name], ['Tempo', S.bpm + ' BPM'], ['Record length', S.bars + (S.bars > 1 ? ' bars' : ' bar')], ['Swing', S.swing ? 'on' : 'off'], ['Click', S.click ? 'on' : 'off'], ['Taught sounds', ['k', 's', 'h'].filter(k => S.model[k]).length + ' of 3']];
+  $('chips').innerHTML = items.map(([a, b]) => `<span class="chip">${a}: <b>${b}</b></span>`).join('');
+}
+document.querySelectorAll('[data-cmd]').forEach(b => b.addEventListener('click', () => { if (!ctx) return; handle(b.dataset.cmd); }));
+$('go').addEventListener('click', async () => {
+  try {
+    initAudio(); await ctx.resume(); await openMic(); closeMic();
+    $('gate').remove(); startListen(); setStatus();
+  } catch (err) { $('gateMsg').textContent = 'The microphone was blocked: ' + (err.message || err) + '. Allow it in the browser\'s site settings and tap again.'; }
+});
+drawGrid(-1); drawChips();
+}
+</script>
+</body>
+</html>
