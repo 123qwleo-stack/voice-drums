@@ -3,14 +3,14 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Voice Drum Studio</title>
+<title>Voice Studio</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@100..125,400..800&display=swap">
 <style>
 /* VOICE: a studio tool you talk to — calm, confident, readable from across the room
-   IDEA: a drum machine whose pads are your own mouth sounds
-   PICTURE: the live step grid, one coloured row per sound, with a moving playhead
-   COLOUR and TYPE: white / near-black ink / signal red, one colour per sound; Archivo wide
-   LAYOUT: status, sounds list, grid, chips, last-heard, commands */
+   IDEA: a multitrack recorder whose tracks are your own beatbox and hums
+   PICTURE: the part strip plus the open part's step grid or piano roll, with a moving playhead
+   COLOUR and TYPE: white / near-black ink / signal red, one colour per part and sound; Archivo wide
+   LAYOUT: status, parts strip, open part, chips, last-heard, commands */
 :root{color-scheme:light dark;--bg:light-dark(#fff,#0e0e0f);--ink:light-dark(#121316,#f1f1f2);--mute:light-dark(#62656d,#a0a2a9);--line:light-dark(#e3e4e7,#2a2b2f);--cell:light-dark(#eef0f3,#1c1d21);--red:#e4002b;--go:#1a9b5a}
 :root[data-theme=light]{color-scheme:light}:root[data-theme=dark]{color-scheme:dark}
 *{box-sizing:border-box;min-width:0}
@@ -23,17 +23,26 @@ h1{font-size:20px;font-stretch:112%;font-weight:800;margin:0 0 18px;display:flex
 #status{font-size:clamp(28px,6vw,46px);line-height:1.05;font-weight:800;font-stretch:112%;margin:0 0 6px;text-wrap:balance}
 #sub{color:var(--mute);margin:0 0 22px;font-size:17px}
 .meter{height:10px;border-radius:5px;background:var(--cell);margin:-8px 0 22px;overflow:hidden}.meter span{display:block;height:100%;width:0;background:var(--red);transition:width .05s}
-.sounds{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin:0 0 16px}
+.parts{display:flex;gap:8px;overflow-x:auto;padding-bottom:4px;margin:0 0 14px}
+.part{flex:none;min-width:150px;text-align:left;border:2px solid var(--line);border-radius:12px;padding:8px 12px;background:none;font-weight:400;min-height:56px}
+.part b{display:block;font-size:16px}.part small{display:block;color:var(--mute);font-size:13px;line-height:1.3}
+.part.cur{border-color:var(--ink)}.part.muted{opacity:.45}
+.part .tag{display:inline-block;width:10px;height:10px;border-radius:3px;margin-right:6px}
+.panel{border-top:3px solid var(--ink);padding-top:12px;margin-bottom:20px}
+.panel h2{margin:0 0 10px}
+.sounds{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:8px;margin:0 0 14px}
 .snd{display:flex;gap:10px;align-items:center;text-align:left;border:1px solid var(--line);border-radius:10px;padding:8px 12px;background:none;min-height:52px;font-weight:400}
 .snd .dot{width:26px;height:26px;border-radius:7px;flex:none;color:#fff;font-weight:800;display:grid;place-items:center;font-size:14px}
 .snd b{display:block;font-size:16px}.snd small{color:var(--mute);font-size:13px;display:block;line-height:1.3}
 .snd.muted{opacity:.45}
-.grid{display:grid;gap:14px;margin-bottom:22px}
+.grid{display:grid;gap:14px}
 .bar{display:grid;grid-template-columns:30px repeat(16,minmax(0,1fr));gap:3px;align-items:center;margin-bottom:3px}
 .lab{font-size:13px;color:var(--mute);font-weight:700}
 .c{aspect-ratio:1/1.15;border-radius:4px;background:var(--cell)}
 .c.beat{outline:1px solid var(--line);outline-offset:-1px}
 .c.ph{box-shadow:inset 0 0 0 3px var(--go)}
+.roll{position:relative;height:220px;background:var(--cell);border-radius:10px;overflow:hidden}
+.roll svg{position:absolute;inset:0;width:100%;height:100%}
 .empty{border:2px dashed var(--line);border-radius:10px;padding:28px;color:var(--mute);text-align:center}
 .chips{display:flex;flex-wrap:wrap;gap:8px;margin:0 0 22px}
 .chip{border:1px solid var(--line);border-radius:999px;padding:6px 14px;font-size:15px;white-space:nowrap}
@@ -42,6 +51,7 @@ h1{font-size:20px;font-stretch:112%;font-weight:800;margin:0 0 18px;display:flex
 .heard p{margin:2px 0}.q{font-size:19px;font-weight:600}.a{color:var(--mute)}
 .cols{display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr);gap:28px}
 h2{font-size:17px;font-weight:800;margin:0 0 8px}
+h3{font-size:15px;font-weight:800;margin:14px 0 4px}
 .cmds{margin:0;padding:0;list-style:none}.cmds li{padding:7px 0;border-bottom:1px solid var(--line)}
 .cmds em{font-style:normal;font-weight:700}
 .btns{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px}
@@ -54,51 +64,69 @@ button:focus-visible{outline:3px solid var(--red);outline-offset:2px}
 #gate p{color:var(--mute);max-width:34em;margin:0 auto 22px}
 #go{background:var(--red);color:#fff;border:0;font-size:20px;min-height:64px;padding:0 34px;border-radius:999px}
 #tapResume{position:fixed;left:16px;right:16px;bottom:16px;z-index:4;background:var(--red);color:#fff;border:0;min-height:60px;font-size:18px;border-radius:14px}
-@media(max-width:700px){.cols{grid-template-columns:1fr}.bar{grid-template-columns:24px repeat(16,minmax(0,1fr));gap:2px}}
+@media(max-width:700px){.cols{grid-template-columns:1fr}.bar{grid-template-columns:24px repeat(16,minmax(0,1fr));gap:2px}.roll{height:180px}}
 @media(prefers-reduced-motion:reduce){.light.on{box-shadow:none}.meter span{transition:none}}
 </style>
 </head>
 <body>
 <button id="tapResume" hidden>Voice paused. Tap to resume listening</button>
 <div id="gate"><div>
-  <h2>Beatbox it. Name it. Shape it.</h2>
-  <p>Tap once so the browser lets this page use your microphone. After that it's all voice. Headphones help a lot, because the mic won't hear the playback.</p>
+  <h2>Beatbox it. Hum it. Build a song.</h2>
+  <p>Tap once so the browser lets this page use your microphone. After that it's all voice. Wear headphones, especially when recording over a part that's playing.</p>
   <button id="go">Tap to start</button>
   <p id="gateMsg" style="margin-top:18px"></p>
 </div></div>
 
 <div class="wrap">
-  <h1><span class="light" id="light"></span>Voice Drum Studio</h1>
-  <p id="status">Say "record a beat"</p>
+  <h1><span class="light" id="light"></span>Voice Studio</h1>
+  <p id="status">Say "record part 1"</p>
   <p id="sub">Listening for commands.</p>
   <div class="meter" id="meterWrap" hidden><span id="meter"></span></div>
-  <div class="sounds" id="sounds"></div>
-  <div class="grid" id="grid"></div>
+  <div class="parts" id="parts"></div>
+  <div class="panel" id="panel"></div>
   <div class="chips"><span class="chip warn" id="voice">Voice: starting…</span><span id="chips" style="display:contents"></span></div>
-  <div class="heard"><p class="q" id="heardQ">Nothing heard yet</p><p class="a" id="heardA">Say "record a beat", freestyle, then go quiet for 2 seconds.</p></div>
+  <div class="heard"><p class="q" id="heardQ">Nothing heard yet</p><p class="a" id="heardA">Say "record part 1", then beatbox, hum or whistle. Go quiet for 2 seconds to finish.</p></div>
   <div class="cols">
     <div>
       <h2>Things you can say</h2>
+      <h3>Recording</h3>
       <ul class="cmds">
-        <li><em>"Record a beat"</em>: after the beep, freestyle. Go quiet for 2 seconds to finish. It splits your beat into Sound 1, Sound 2… and plays it back with your own mouth sounds.</li>
-        <li><em>"Sound 1 is a kick"</em> / <em>"Make sound 2 a deep boomy 808 kick"</em> / <em>"Sound 3 is a crunchy snare with reverb"</em></li>
-        <li>Drums it knows: kick, snare, clap, hi-hat, open hat, tom, rimshot, crash, cowbell, shaker</li>
-        <li>Shaping words: deep, high, tight, long, punchy, crunchy, soft, bright, reverb, dry, 808, techno, real</li>
-        <li><em>"Make the kick deeper"</em> / <em>"Sound 2 back to my voice"</em> / <em>"Play sound 2"</em></li>
-        <li><em>"Mute sound 3"</em> / <em>"Sound 1 louder"</em> / <em>"Merge sound 3 into sound 1"</em> (if it split one sound in two)</li>
-        <li><em>"Make them drums"</em>: guesses a drum for every sound</li>
-        <li><em>"Make it techno"</em>: also trap, house, lo-fi, real, for every drum at once</li>
-        <li><em>"Play"</em> / <em>"Loop it 8 times"</em> / <em>"Loop forever"</em> / <em>"Stop"</em> / <em>"Undo"</em></li>
-        <li><em>"Make it 4 bars"</em> / <em>"Half time"</em> / <em>"Double time"</em> / <em>"Tempo 120"</em> / <em>"Add swing"</em></li>
+        <li><em>"Record part 1"</em>: beatbox, hum or whistle after the beep. It figures out which, plus the tempo. Go quiet for 2 seconds to finish.</li>
+        <li><em>"Record part 2"</em>: four clicks, then part 1 plays while you record over it</li>
+        <li><em>"Record part 2 alone"</em>: just a click to keep time, nothing else playing</li>
+        <li><em>"Record part 3 with part 1"</em> / <em>"Record a melody"</em> / <em>"Record drums"</em> / <em>"Record part 2 for 4 bars"</em></li>
+        <li><em>"Redo part 2"</em> / <em>"Delete part 3"</em></li>
+      </ul>
+      <h3>Listening</h3>
+      <ul class="cmds">
+        <li><em>"Play"</em> (everything) / <em>"Play part 2"</em> (just that one) / <em>"Play part 1 and 2"</em> / <em>"Loop forever"</em> / <em>"Stop"</em></li>
+        <li><em>"Mute part 1"</em> / <em>"Unmute part 1"</em> / <em>"Part 2 louder"</em> / <em>"Part 2 is late"</em> (nudges it)</li>
+        <li><em>"Go to part 1"</em>: opens a part to change it</li>
+      </ul>
+      <h3>Drum parts</h3>
+      <ul class="cmds">
+        <li><em>"Sound 1 is a kick"</em> / <em>"Make sound 2 a deep boomy 808 kick"</em> / <em>"Make the snare crunchy"</em> / <em>"Make them drums"</em></li>
+        <li><em>"Mute sound 3"</em> / <em>"Merge sound 3 into sound 1"</em> / <em>"Sound 2 back to my voice"</em> / <em>"Make it techno"</em></li>
+      </ul>
+      <h3>Melody parts</h3>
+      <ul class="cmds">
+        <li><em>"Make it a guitar"</em>: also piano, flute, strings, synth, bass, organ, marimba, bells, trumpet, sax, pad, choir, whistle</li>
+        <li><em>"Part 2 is an electric guitar"</em> / <em>"Octave up"</em> / <em>"Make it short"</em> / <em>"More reverb"</em> / <em>"Back to my voice"</em></li>
+        <li><em>"Turn off snap"</em>: keeps your exact notes instead of fixing them to the key</li>
+      </ul>
+      <h3>Everything</h3>
+      <ul class="cmds">
+        <li><em>"Make it 4 bars"</em> / <em>"Tempo 120"</em> / <em>"Half time"</em> / <em>"Add swing"</em> / <em>"Undo"</em> / <em>"Calibrate"</em></li>
       </ul>
     </div>
     <div>
       <h2>Backup buttons</h2>
-      <div class="btns"><button data-cmd="record a beat">Record</button><button data-cmd="play">Play</button><button data-cmd="stop">Stop</button><button data-cmd="undo">Undo</button><button data-cmd="make them drums">Auto drums</button></div>
+      <div class="btns"><button data-cmd="record next part">Record next part</button><button data-cmd="play everything">Play all</button><button data-cmd="stop">Stop</button><button data-cmd="undo">Undo</button></div>
       <div class="tips">
-        <p>Tap a sound card to hear it.</p>
+        <p>Tap a part to open it, and tap a sound card to hear it.</p>
+        <p><b>Headphones matter</b> when recording over playback. Otherwise the mic records the speaker too.</p>
+        <p>If parts you record over playback land late, say "calibrate" and say "ta" on each click. Bluetooth headphones especially need this.</p>
         <p>If voice stops working, tap anywhere on the page to wake it.</p>
-        <p>Play stops after a few loops on purpose, so it can hear you again. Say "loop forever" for nonstop.</p>
         <p id="srWarn"></p>
         <p id="vlog">Voice log: none yet</p>
       </div>
@@ -281,7 +309,7 @@ const DSP = (() => {
   // hits: [{time, type, level}] absolute seconds. Returns {pat, bpm, bars, used}
   function freestyle(hits, fallbackBpm, forceBpm) {
     hits = hits.slice().sort((a, b) => a.time - b.time);
-    if (!hits.length) return { pat: null, bpm: fallbackBpm, bars: 0, used: 0 };
+    if (!hits.length) return { pat: null, bpm: fallbackBpm, bars: 0, used: 0, grid: [] };
     const t0 = hits[0].time - 0.3, last = hits[hits.length - 1].time;
     let bpm = fallbackBpm, beats;
     if (hits.length >= 4) {
@@ -315,7 +343,7 @@ const DSP = (() => {
     const pat = Array.from({ length: bars * 16 }, () => ({}));
     let used = 0;
     for (const [i, t, v] of placed) if (i < pat.length) { if (v > (pat[i][t] || 0)) pat[i][t] = v; used++; }
-    return { pat, bpm: Math.round(60 / med), bars, used };
+    return { pat, bpm: Math.round(60 / med), bars, used, grid };
   }
 
   /* ---- sound grouping: split hits into however many distinct mouth sounds ---- */
@@ -368,7 +396,7 @@ const DSP = (() => {
     }
     const top = Math.max(...res.map(r => r.s));
     if (top < .25) return vecs.map(() => 0);
-    const pick = res.find(r => r.s >= top - .04);
+    const pick = res.find(r => r.s >= top - .07);
     const order = []; for (const l of pick.L) if (!order.includes(l)) order.push(l);
     return pick.L.map(l => order.indexOf(l));
   }
@@ -380,7 +408,77 @@ const DSP = (() => {
     return hits;
   }
 
-  return { detectOnsets, features, classify, analyze, quantize, trainMean, beatOffset, freestyle, groupSounds, analyzeSounds };
+
+  /* ---- pitch: hums and whistles to notes ---- */
+  function pitchTrack(x, sr) {
+    const D = Math.max(1, Math.round(sr / 12000)), fs = sr / D, n = Math.floor(x.length / D), y = new Float32Array(n);
+    const a = Math.exp(-2 * Math.PI * 3000 / sr); let s1 = 0, s2 = 0;
+    for (let i = 0, j = 0; i < x.length; i++) { s1 = (1 - a) * x[i] + a * s1; s2 = (1 - a) * s1 + a * s2; if (i % D === 0 && j < n) y[j++] = s2; }
+    const W = 384, H = 128, minLag = Math.max(2, Math.floor(fs / 2600)), maxLag = Math.ceil(fs / 70);
+    const frames = []; let peak = 0;
+    for (let st = 0; st + W + maxLag + 1 < n; st += H) {
+      let e = 0; for (let i = 0; i < W; i++) e += y[st + i] * y[st + i];
+      const rms = Math.sqrt(e / W); peak = Math.max(peak, rms); frames.push({ t: (st + W / 2) / fs, rms, f0: 0, st });
+    }
+    const gate = Math.max(peak * .04, .0006), d = new Float64Array(maxLag + 2), c = new Float64Array(maxLag + 2);
+    for (const fr of frames) {
+      if (fr.rms < gate) continue;
+      const st = fr.st; let cum = 0; c[0] = 1;
+      for (let tau = 1; tau <= maxLag + 1; tau++) { let s = 0; for (let i = 0; i < W; i++) { const v = y[st + i] - y[st + i + tau]; s += v * v; } d[tau] = s; cum += s; c[tau] = s * tau / (cum || 1e-12); }
+      let tau = -1;
+      for (let k = minLag; k < maxLag; k++) if (c[k] < .2) { while (k + 1 < maxLag && c[k + 1] < c[k]) k++; tau = k; break; }
+      if (tau < 1) continue;
+      const a0 = c[tau - 1], a1 = c[tau], a2 = c[tau + 1], den = a0 - 2 * a1 + a2;
+      fr.f0 = fs / (tau + (den ? .5 * (a0 - a2) / den : 0));
+    }
+    const loud = frames.filter(f => f.rms >= gate);
+    return { frames, gate, voiced: loud.length ? loud.filter(f => f.f0 > 0).length / loud.length : 0, loudTime: loud.length * H / fs };
+  }
+  const med = a => { const b = a.slice().sort((p, q) => p - q); return b[Math.floor(b.length / 2)]; };
+  function notesFrom(track) {
+    const fr = track.frames, runs = []; let run = null, gap = 0;
+    for (const f of fr) {
+      if (f.f0 > 0) { if (!run) run = []; run.push(f); gap = 0; }
+      else if (run) { if (++gap > 3) { runs.push(run); run = null; gap = 0; } }
+    }
+    if (run) runs.push(run);
+    const notes = [];
+    for (const r of runs) {
+      const raw = r.map(f => 69 + 12 * Math.log2(f.f0 / 440));
+      // fold octave slips, then smooth
+      const m0 = med(raw), m = raw.map(v => { while (v - m0 > 7) v -= 12; while (m0 - v > 7) v += 12; return v; });
+      const sm = m.map((_, i) => med(m.slice(Math.max(0, i - 2), i + 3)));
+      let s = 0, off = 0;
+      const close = (a, b) => { if (b - a < 6) return; const seg = sm.slice(a, b); notes.push({ start: r[a].t, end: r[b - 1].t + .011, midi: med(seg), level: Math.max(...r.slice(a, b).map(f => f.rms)) }); };
+      for (let i = 1; i < sm.length; i++) {
+        const ref = med(sm.slice(Math.max(s, i - 8), i));
+        if (Math.abs(sm[i] - ref) > .75) { if (++off >= 3) { close(s, i - 2); s = i - 2; off = 0; } } else off = 0;
+      }
+      close(s, sm.length);
+    }
+    return notes;
+  }
+  const MAJ = [6.35, 2.23, 3.48, 2.33, 4.38, 4.09, 2.52, 5.19, 2.39, 3.66, 2.29, 2.88], MIN = [6.33, 2.68, 3.52, 5.38, 2.6, 3.53, 2.54, 4.75, 3.98, 2.69, 3.34, 3.17];
+  function findKey(notes) {
+    const h = new Array(12).fill(0); for (const n of notes) h[((Math.round(n.midi) % 12) + 12) % 12] += n.end - n.start;
+    let best = { root: 0, minor: false, r: -2 };
+    for (let root = 0; root < 12; root++) for (const minor of [false, true]) {
+      const P = minor ? MIN : MAJ, xs = [], ys = []; for (let i = 0; i < 12; i++) { xs.push(h[(root + i) % 12]); ys.push(P[i]); }
+      const mx = xs.reduce((a, b) => a + b) / 12, my = ys.reduce((a, b) => a + b) / 12;
+      let num = 0, dx = 0, dy = 0; for (let i = 0; i < 12; i++) { num += (xs[i] - mx) * (ys[i] - my); dx += (xs[i] - mx) ** 2; dy += (ys[i] - my) ** 2; }
+      const r = num / Math.sqrt(dx * dy || 1); if (r > best.r) best = { root, minor, r };
+    }
+    return best;
+  }
+  function snap(m, key) {
+    if (!key) return Math.round(m);
+    const sc = key.minor ? [0, 2, 3, 5, 7, 8, 10] : [0, 2, 4, 5, 7, 9, 11];
+    let best = Math.round(m), bd = Infinity;
+    for (let k = Math.floor(m) - 2; k <= Math.ceil(m) + 2; k++) if (sc.includes(((k - key.root) % 12 + 12) % 12) && Math.abs(k - m) < bd) { bd = Math.abs(k - m); best = k; }
+    return best;
+  }
+
+  return { pitchTrack, notesFrom, findKey, snap, detectOnsets, features, classify, analyze, quantize, trainMean, beatOffset, freestyle, groupSounds, analyzeSounds };
 })();
 
 
@@ -391,18 +489,13 @@ const $ = id => document.getElementById(id);
 const store = { get(k, d) { try { const v = localStorage.getItem('vds_' + k); return v ? JSON.parse(v) : d; } catch { return d; } }, set(k, v) { try { localStorage.setItem('vds_' + k, JSON.stringify(v)); } catch {} } };
 const COLORS = ['#e4002b', '#2a6df4', '#1a9b5a', '#d98200', '#8a3ffc', '#0a9fb0'];
 const NAMES = { kick: 'kick', snare: 'snare', clap: 'clap', hat: 'hi-hat', openhat: 'open hi-hat', tom: 'tom', rim: 'rimshot', cymbal: 'crash', cowbell: 'cowbell', shaker: 'shaker' };
+const MNAMES = { guitar: 'guitar', piano: 'piano', flute: 'flute', strings: 'strings', synth: 'synth', bass: 'bass', organ: 'organ', marimba: 'marimba', bell: 'bells', brass: 'trumpet', sax: 'sax', pad: 'pad', choir: 'choir', whistle: 'whistle' };
+const KEYN = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
 const GUESS = { k: 'kick', s: 'snare', h: 'hat' };
 const INST = {
-  kick: { f0: 130, f1: 50, sw: .07, dec: .42, click: .3 },
-  snare: { tone: 190, mix: .5, hp: 1200, dec: .2 },
-  clap: { dec: .22 },
-  hat: { base: 42, hp: 7500, dec: .05 },
-  openhat: { base: 42, hp: 7000, dec: .38 },
-  tom: { f0: 220, f1: 120, dec: .35 },
-  rim: { f: 1700, dec: .05 },
-  cymbal: { hp: 5000, dec: 1.6 },
-  cowbell: { f: 545, dec: .28 },
-  shaker: { dec: .07 }
+  kick: { f0: 130, f1: 50, sw: .07, dec: .42, click: .3 }, snare: { tone: 190, mix: .5, hp: 1200, dec: .2 }, clap: { dec: .22 },
+  hat: { base: 42, hp: 7500, dec: .05 }, openhat: { base: 42, hp: 7000, dec: .38 }, tom: { f0: 220, f1: 120, dec: .35 },
+  rim: { f: 1700, dec: .05 }, cymbal: { hp: 5000, dec: 1.6 }, cowbell: { f: 545, dec: .28 }, shaker: { dec: .07 }
 };
 const STYLES = {
   acoustic: { name: 'Real', pitch: 1, decay: 1, drive: 0, tone: 1, rev: .25, click: 1, kickDecay: 1 },
@@ -411,36 +504,39 @@ const STYLES = {
   lofi: { name: 'Lo-fi', pitch: .95, decay: .8, drive: .35, tone: .28, rev: .25, click: .5, kickDecay: .8 },
   house: { name: 'House', pitch: 1, decay: 1.1, drive: .15, tone: .9, rev: .28, click: 1, kickDecay: 1 }
 };
-const STYLE_WORDS = [[/techno|industrial|rave|909/, 'techno'], [/trap|808|hip ?hop|drill/, 'trap'], [/lo ?-?fi|chill|jazz|dusty|vintage/, 'lofi'], [/house|disco|dance|club/, 'house'], [/acoustic|\breal\b|rock|\blive\b|natural|normal/, 'acoustic']];
+const STYLE_WORDS = [[/techno|industrial|rave|909/, 'techno'], [/trap|808|hip ?hop|drill/, 'trap'], [/lo ?-?fi|chill|jazz|dusty|vintage/, 'lofi'], [/house|disco|dance|club/, 'house'], [/acoustic drums|\breal\b|rock|\blive\b|natural|normal/, 'acoustic']];
 const DESC = [
   [/deep|low|boom|big|sub|fat|huge|thick/, { pitch: .72, decay: 1.4 }],
   [/high|tight|short|small|thin|tiny/, { pitch: 1.3, decay: .6 }],
   [/snappy|punchy|hard|attack/, { click: 1.9, decay: .85 }],
   [/long|ringing|ring|sustain|loose/, { decay: 1.9 }],
-  [/distort|crunch|dirty|grit|fuzz|saturat|heavy|aggressive/, { drive: .65 }],
-  [/soft|muffled|warm|dull|dusty|lo ?-?fi|vintage|old/, { tone: .3 }],
+  [/distort|crunch|dirty|grit|fuzz|saturat|heavy|aggressive|electric/, { drive: .65 }],
+  [/soft|muffled|warm|dull|dusty|lo ?fi|vintage|old/, { tone: .3 }],
   [/bright|crisp|sharp|clicky|shiny/, { tone: 1.7, click: 1.5 }],
   [/reverb|echo|room|spac|hall|wet|stadium/, { rev: .6 }],
   [/\bdry\b|close|in your face/, { rev: 0 }]
 ];
-const INST_WORDS = [[/open ?(hi|high)? ?-?hats?/, 'openhat'], [/(hi|high) ?-?hats?|\bhats?\b|closed hat/, 'hat'], [/kicks?\b|bass drum|\bkik/, 'kick'], [/snares?|snair/, 'snare'], [/claps?\b|clapping/, 'clap'], [/\btoms?\b|floor tom/, 'tom'], [/rim ?shot|\brim\b|side ?stick|stick/, 'rim'], [/crash|cymbal|\bride\b|splash/, 'cymbal'], [/cowbell|\bbell\b/, 'cowbell'], [/shaker|maraca|tambourine|\bshake/, 'shaker']];
+const INST_WORDS = [[/open ?(hi|high)? ?hats?/, 'openhat'], [/(hi|high) ?hats?|\bhats?\b|closed hat/, 'hat'], [/kicks?\b|bass drum|\bkik/, 'kick'], [/snares?|snair/, 'snare'], [/claps?\b|clapping/, 'clap'], [/\btoms?\b|floor tom/, 'tom'], [/rim ?shot|\brim\b|side ?stick|\bstick/, 'rim'], [/crash|cymbal|\bride\b|splash/, 'cymbal'], [/cowbell/, 'cowbell'], [/shaker|maraca|tambourine|\bshake/, 'shaker']];
+const MEL_WORDS = [[/guitar|ukulele|banjo|harp/, 'guitar'], [/piano|keys|keyboard/, 'piano'], [/flute|recorder/, 'flute'], [/violin|strings|cello|viola|orchestra|fiddle/, 'strings'], [/synth|synthesizer|\blead\b/, 'synth'], [/\bbass\b(?! drum)/, 'bass'], [/organ/, 'organ'], [/marimba|xylophone|vibraphone|kalimba|steel drum/, 'marimba'], [/(?<!cow)bells?\b|chimes?|music box|glockenspiel/, 'bell'], [/trumpet|horn|brass|trombone|tuba/, 'brass'], [/\bsax|saxophone|clarinet|oboe/, 'sax'], [/\bpads?\b|ambient|atmospher/, 'pad'], [/choir|voices|ooh|aah/, 'choir'], [/whistle|sine wave|pure tone/, 'whistle']];
 const NUM = { one: 1, won: 1, first: 1, two: 2, to: 2, too: 2, second: 2, three: 3, tree: 3, third: 3, four: 4, for: 4, fourth: 4, five: 5, fifth: 5, six: 6, sixth: 6, seven: 7, eight: 8, ten: 10, twelve: 12, sixteen: 16, once: 1, twice: 2 };
+const NUMW = '(\\d+|one|won|two|to|too|three|tree|four|for|five|six)';
 
-const S = { bpm: store.get('bpm', 100), bars: 2, style: store.get('style', 'acoustic'), swing: false, pattern: null, sounds: [], hist: [], lastHits: null, busy: false, stopRec: false };
-
+const S = { bpm: store.get('bpm', 100), style: store.get('style', 'acoustic'), swing: false, latency: store.get('latency', null), parts: [], cur: 0, solo: null, hist: [], busy: false, stopRec: false };
 let ctx, bus, comp, revSend, noiseBuf, micStream = null, rec = null, wantListen = false;
+const curPart = () => S.parts[S.cur];
 
 /* ---------- audio engine ---------- */
 function initAudio() {
   ctx = new (window.AudioContext || window.webkitAudioContext)();
   comp = ctx.createDynamicsCompressor(); comp.threshold.value = -14; comp.ratio.value = 4;
-  const master = ctx.createGain(); master.gain.value = .85; comp.connect(master); master.connect(ctx.destination);
+  const master = ctx.createGain(); master.gain.value = .8; comp.connect(master); master.connect(ctx.destination);
   bus = ctx.createGain(); bus.connect(comp);
   const conv = ctx.createConvolver(), L = ctx.sampleRate * 1.8, ir = ctx.createBuffer(2, L, ctx.sampleRate);
   for (let c = 0; c < 2; c++) { const d = ir.getChannelData(c); for (let i = 0; i < L; i++) d[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / L, 3.5); }
   conv.buffer = ir; revSend = ctx.createGain(); revSend.connect(conv); conv.connect(comp);
   noiseBuf = ctx.createBuffer(1, ctx.sampleRate, ctx.sampleRate);
   const nd = noiseBuf.getChannelData(0); for (let i = 0; i < nd.length; i++) nd[i] = Math.random() * 2 - 1;
+  if (S.latency == null) S.latency = Math.min(.25, (ctx.outputLatency || 0) + (ctx.baseLatency || 0) + .03);
 }
 const curves = {};
 function curve(drive) {
@@ -449,12 +545,8 @@ function curve(drive) {
   for (let i = 0; i < n; i++) { const x = i / (n - 1) * 2 - 1; c[i] = (1 + k) * x / (1 + k * Math.abs(x)) / (1 + k * .12); }
   return curves[key] = c;
 }
-function settings(snd) {
-  const st = STYLES[snd.style || S.style], m = snd.mods;
-  return { pitch: st.pitch * m.pitch, decay: st.decay * m.decay * (snd.type === 'kick' ? st.kickDecay : 1), drive: Math.min(1, st.drive + m.drive), tone: st.tone * m.tone, rev: m.rev != null ? m.rev : st.rev, click: st.click * m.click };
-}
-function chain(t, vel, snd, Z) {
-  const g = ctx.createGain(); g.gain.value = vel * snd.vol;
+function chain(vel, vol, Z) {
+  const g = ctx.createGain(); g.gain.value = vel * vol;
   const lp = ctx.createBiquadFilter(); lp.type = 'lowpass'; lp.frequency.value = Math.max(700, Math.min(18000, 16000 * Z.tone));
   let node = g;
   if (Z.drive > .02) { const sh = ctx.createWaveShaper(); sh.curve = curve(Z.drive); g.connect(sh); node = sh; }
@@ -463,87 +555,113 @@ function chain(t, vel, snd, Z) {
   return g;
 }
 function env(g, t, peak, dec, att = .001) { g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(Math.max(.0002, peak), t + att); g.gain.exponentialRampToValueAtTime(.0001, t + att + dec); }
-function noise(t, dur, dest) { const s = ctx.createBufferSource(); s.buffer = noiseBuf; s.connect(dest); s.start(t, Math.random() * .5); s.stop(t + dur + .05); }
+function noise(t, dur, dest) { const s = ctx.createBufferSource(); s.buffer = noiseBuf; s.loop = true; s.connect(dest); s.start(t, Math.random() * .5); s.stop(t + dur + .05); }
 function osc(type, f, t, dur, dest) { const o = ctx.createOscillator(); o.type = type; o.frequency.value = f; o.connect(dest); o.start(t); o.stop(t + dur + .05); return o; }
 function filt(type, f, q, dest) { const b = ctx.createBiquadFilter(); b.type = type; b.frequency.value = f; if (q) b.Q.value = q; b.connect(dest); return b; }
-function gainTo(dest) { const g = ctx.createGain(); g.connect(dest); return g; }
+function gainTo(dest, v = 1) { const g = ctx.createGain(); g.gain.value = v; g.connect(dest); return g; }
 
+/* drum voices */
+function settings(snd) {
+  const st = STYLES[snd.style || S.style], m = snd.mods;
+  return { pitch: st.pitch * m.pitch, decay: st.decay * m.decay * (snd.type === 'kick' ? st.kickDecay : 1), drive: Math.min(1, st.drive + m.drive), tone: st.tone * m.tone, rev: m.rev != null ? m.rev : st.rev, click: st.click * m.click };
+}
 const VOICES = {
-  kick(t, out, P, Z) {
-    const g = gainTo(out), o = osc('sine', P.f0 * Z.pitch, t, P.dec * Z.decay, g);
-    o.frequency.setValueAtTime(P.f0 * Z.pitch, t); o.frequency.exponentialRampToValueAtTime(P.f1 * Z.pitch, t + P.sw);
-    env(g, t, 1, P.dec * Z.decay);
-    const cg = gainTo(out); env(cg, t, P.click * Z.click, .012); noise(t, .03, filt('highpass', 3000, 0, cg));
-  },
-  snare(t, out, P, Z) {
-    const g = gainTo(out); env(g, t, .8, P.dec * Z.decay); noise(t, P.dec * Z.decay, filt('highpass', P.hp * Z.pitch, .7, g));
-    const og = gainTo(out), o = osc('triangle', P.tone * Z.pitch, t, .12, og);
-    o.frequency.setValueAtTime(P.tone * Z.pitch * 1.4, t); o.frequency.exponentialRampToValueAtTime(P.tone * Z.pitch, t + .03); env(og, t, P.mix, .1);
-  },
-  clap(t, out, P, Z) {
-    const g = gainTo(out), d = P.dec * Z.decay; g.gain.setValueAtTime(.0001, t);
-    for (let i = 0; i < 3; i++) { g.gain.exponentialRampToValueAtTime(.9, t + i * .011 + .001); g.gain.exponentialRampToValueAtTime(.15, t + i * .011 + .009); }
-    g.gain.exponentialRampToValueAtTime(.0001, t + .035 + d); noise(t, d + .04, filt('bandpass', 1400 * Z.pitch, 1.2, g));
-  },
+  kick(t, out, P, Z) { const g = gainTo(out), o = osc('sine', P.f0 * Z.pitch, t, P.dec * Z.decay, g); o.frequency.setValueAtTime(P.f0 * Z.pitch, t); o.frequency.exponentialRampToValueAtTime(P.f1 * Z.pitch, t + P.sw); env(g, t, 1, P.dec * Z.decay); const cg = gainTo(out); env(cg, t, P.click * Z.click, .012); noise(t, .03, filt('highpass', 3000, 0, cg)); },
+  snare(t, out, P, Z) { const g = gainTo(out); env(g, t, .8, P.dec * Z.decay); noise(t, P.dec * Z.decay, filt('highpass', P.hp * Z.pitch, .7, g)); const og = gainTo(out), o = osc('triangle', P.tone * Z.pitch, t, .12, og); o.frequency.setValueAtTime(P.tone * Z.pitch * 1.4, t); o.frequency.exponentialRampToValueAtTime(P.tone * Z.pitch, t + .03); env(og, t, P.mix, .1); },
+  clap(t, out, P, Z) { const g = gainTo(out), d = P.dec * Z.decay; g.gain.setValueAtTime(.0001, t); for (let i = 0; i < 3; i++) { g.gain.exponentialRampToValueAtTime(.9, t + i * .011 + .001); g.gain.exponentialRampToValueAtTime(.15, t + i * .011 + .009); } g.gain.exponentialRampToValueAtTime(.0001, t + .035 + d); noise(t, d + .04, filt('bandpass', 1400 * Z.pitch, 1.2, g)); },
   hat(t, out, P, Z) { metal(t, out, P.base * Z.pitch, P.hp, P.dec * Z.decay, .35); },
   openhat(t, out, P, Z) { metal(t, out, P.base * Z.pitch, P.hp, P.dec * Z.decay, .3); },
-  tom(t, out, P, Z) {
-    const g = gainTo(out), o = osc('sine', P.f0 * Z.pitch, t, P.dec * Z.decay, g);
-    o.frequency.setValueAtTime(P.f0 * Z.pitch * 1.3, t); o.frequency.exponentialRampToValueAtTime(P.f1 * Z.pitch, t + P.dec * Z.decay); env(g, t, .9, P.dec * Z.decay);
-  },
+  tom(t, out, P, Z) { const g = gainTo(out), o = osc('sine', P.f0 * Z.pitch, t, P.dec * Z.decay, g); o.frequency.setValueAtTime(P.f0 * Z.pitch * 1.3, t); o.frequency.exponentialRampToValueAtTime(P.f1 * Z.pitch, t + P.dec * Z.decay); env(g, t, .9, P.dec * Z.decay); },
   rim(t, out, P, Z) { const g = gainTo(out); env(g, t, .7, P.dec * Z.decay); const b = filt('bandpass', P.f * Z.pitch, 4, g); osc('square', P.f * Z.pitch * .5, t, .06, b); noise(t, .03, b); },
   cymbal(t, out, P, Z) { const g = gainTo(out); env(g, t, .3, P.dec * Z.decay); noise(t, P.dec * Z.decay, filt('highpass', P.hp * Z.pitch, 0, g)); metal(t, out, 48 * Z.pitch, 6000, P.dec * Z.decay * .8, .12); },
   cowbell(t, out, P, Z) { const g = gainTo(out); env(g, t, .5, P.dec * Z.decay); const b = filt('bandpass', P.f * 1.5 * Z.pitch, 2, g); osc('square', P.f * Z.pitch, t, P.dec * Z.decay, b); osc('square', P.f * 1.48 * Z.pitch, t, P.dec * Z.decay, b); },
   shaker(t, out, P, Z) { const g = gainTo(out), d = P.dec * Z.decay; g.gain.setValueAtTime(.0001, t); g.gain.exponentialRampToValueAtTime(.35, t + d * .4); g.gain.exponentialRampToValueAtTime(.0001, t + d); noise(t, d, filt('bandpass', 6500 * Z.pitch, 1.5, g)); }
 };
-function metal(t, out, base, hp, dec, peak) {
-  const g = gainTo(out), h = filt('highpass', hp, 0, g), b = filt('bandpass', 10000, 0, h);
-  for (const r of [2, 3, 4.16, 5.43, 6.79, 8.21]) osc('square', base * r, t, dec, b);
-  env(g, t, peak, dec);
-}
-function hit(snd, t, vel) {
+function metal(t, out, base, hp, dec, peak) { const g = gainTo(out), h = filt('highpass', hp, 0, g), b = filt('bandpass', 10000, 0, h); for (const r of [2, 3, 4.16, 5.43, 6.79, 8.21]) osc('square', base * r, t, dec, b); env(g, t, peak, dec); }
+function drumHit(part, snd, t, vel) {
   if (snd.muted) return;
-  const Z = settings(snd), out = chain(t, vel, snd, Z);
-  if (!snd.type) {
-    if (!snd.clip) return;
-    const s = ctx.createBufferSource(); s.buffer = snd.clip; s.playbackRate.value = snd.mods.pitch; s.connect(out); s.start(t);
-  } else VOICES[snd.type](t, out, INST[snd.type], Z);
+  const Z = settings(snd), out = chain(vel, snd.vol * part.vol, Z);
+  if (!snd.type) { if (!snd.clip) return; const s = ctx.createBufferSource(); s.buffer = snd.clip; s.playbackRate.value = snd.mods.pitch; s.connect(out); s.start(t); }
+  else VOICES[snd.type](t, out, INST[snd.type], Z);
 }
-function chirp(ok) {
-  if (!ctx) return; const t = ctx.currentTime + .01, o = ctx.createOscillator(), g = ctx.createGain(); o.connect(g); g.connect(ctx.destination);
-  o.frequency.setValueAtTime(ok ? 660 : 330, t); o.frequency.setValueAtTime(ok ? 990 : 250, t + .07); env(g, t, .12, .14); o.start(t); o.stop(t + .2);
+
+/* melody voices */
+const mtof = m => 440 * 2 ** ((m - 69) / 12);
+function adsr(g, t, d, a, s, dk, r, peak = 1) { g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(peak, t + a); g.gain.setTargetAtTime(peak * s, t + a, Math.max(.01, dk / 3)); g.gain.setTargetAtTime(0, t + Math.max(a, d), Math.max(.01, r / 3)); return t + Math.max(a, d) + r * 1.5; }
+function vib(t, f, oscs, depth = .005, rate = 5.5) { const l = ctx.createOscillator(), g = ctx.createGain(); l.frequency.value = rate; g.gain.setValueAtTime(0, t); g.gain.linearRampToValueAtTime(f * depth, t + .25); l.connect(g); oscs.forEach(o => g.connect(o.frequency)); l.start(t); return l; }
+const ksCache = {};
+function ksBuffer(midi) {
+  if (ksCache[midi]) return ksCache[midi];
+  const sr = ctx.sampleRate, f = mtof(midi), N = Math.max(2, Math.round(sr / f)), len = Math.round(sr * 2.2), b = ctx.createBuffer(1, len, sr), d = b.getChannelData(0), buf = new Float32Array(N);
+  for (let i = 0; i < N; i++) buf[i] = Math.random() * 2 - 1;
+  const damp = Math.min(.999, .998 - Math.max(0, midi - 55) * .0003); let p = 0;
+  for (let i = 0; i < len; i++) { const nx = (p + 1) % N; d[i] = buf[p]; buf[p] = damp * .5 * (buf[p] + buf[nx]); p = nx; }
+  return ksCache[midi] = { b, rate: f * N / sr };
 }
-function beep(t) { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = 1500; o.connect(g); g.connect(ctx.destination); env(g, t, .35, .06); o.start(t); o.stop(t + .1); }
+function playNote(part, t, dur, midi, vel) {
+  const m = part.mods, inst = part.inst, out = chain(vel, part.vol * .55, { tone: m.tone, drive: m.drive, rev: m.rev != null ? m.rev : .22 });
+  const mm = midi + 12 * m.oct + (inst === 'bass' ? -12 : 0), f = mtof(mm), d = m.short ? Math.min(dur, .12) : dur, g = gainTo(out);
+  let end, oscs = [];
+  const add = (type, ff, v = 1, dest = g) => { const o = ctx.createOscillator(); o.type = type; o.frequency.value = ff; o.connect(v === 1 ? dest : gainTo(dest, v)); oscs.push(o); return o; };
+  switch (inst) {
+    case 'piano': add('triangle', f); add('sine', f * 2, .25); end = adsr(g, t, d, .005, .12, 1, .2); break;
+    case 'guitar': { const k = ksBuffer(Math.round(mm)), s = ctx.createBufferSource(); s.buffer = k.b; s.playbackRate.value = k.rate * mtof(mm) / mtof(Math.round(mm)); s.connect(g); g.gain.setValueAtTime(1, t); g.gain.setTargetAtTime(0, t + Math.min(d, 2), .05); s.start(t); s.stop(t + Math.min(d, 2) + .3); return; }
+    case 'flute': { add('sine', f); add('sine', f * 2, .12); const ng = gainTo(g, .06); noise(t, d + .1, filt('bandpass', f * 2, 2, ng)); end = adsr(g, t, d, .06, .85, .1, .08, .9); vib(t, f, oscs, .006).stop(end); break; }
+    case 'strings': { const lp = filt('lowpass', 3000, 0, g); add('sawtooth', f * 1.003, .5, lp); add('sawtooth', f * .997, .5, lp); end = adsr(g, t, d, .12, .9, .2, .25, .7); vib(t, f, oscs, .005).stop(end); break; }
+    case 'synth': { const lp = filt('lowpass', 1500, 2, g); lp.frequency.setValueAtTime(4500, t); lp.frequency.setTargetAtTime(1500, t, .08); add('sawtooth', f, .5, lp); add('square', f * 1.005, .35, lp); end = adsr(g, t, d, .01, .7, .2, .08, .7); break; }
+    case 'bass': { const lp = filt('lowpass', 700, 1, g); add('sawtooth', f, .5, lp); add('sine', f, .8); end = adsr(g, t, d, .005, .8, .2, .06); break; }
+    case 'organ': [1, 2, 3, 4].forEach((h, i) => add('sine', f * h, [1, .5, .3, .2][i] * .6)); end = adsr(g, t, d, .01, 1, .1, .05); break;
+    case 'marimba': add('sine', f); add('sine', f * 4, .15); end = adsr(g, t, Math.min(d, .05), .002, 0, .5, .4); break;
+    case 'bell': add('sine', f); add('sine', f * 2.76, .35); add('sine', f * 5.4, .15); end = adsr(g, t, Math.min(d, .05), .002, 0, 1.8, 1); break;
+    case 'brass': { const lp = filt('lowpass', 600, 1, g); lp.frequency.setValueAtTime(600, t); lp.frequency.linearRampToValueAtTime(2800, t + .08); add('sawtooth', f, .6, lp); end = adsr(g, t, d, .05, .8, .1, .1); vib(t, f, oscs, .004).stop(end); break; }
+    case 'sax': { const bp = filt('bandpass', 1500, .8, g); add('square', f, .6, bp); end = adsr(g, t, d, .04, .85, .1, .1, 1.2); vib(t, f, oscs, .005).stop(end); break; }
+    case 'pad': { const lp = filt('lowpass', 1800, 0, g); [1.004, 1, .996].forEach(x => add('sawtooth', f * x, .3, lp)); end = adsr(g, t, d, .4, .9, .3, .6, .7); break; }
+    case 'choir': { const a = filt('bandpass', 700, 5, g), b2 = filt('bandpass', 1150, 5, g); const o = add('sawtooth', f, 1.5, a); o.connect(gainTo(b2, 1.2)); end = adsr(g, t, d, .15, .9, .2, .3); vib(t, f, oscs, .006).stop(end); break; }
+    default: add('sine', f); end = adsr(g, t, d, .03, .9, .1, .06); vib(t, f, oscs, .004).stop(end);
+  }
+  oscs.forEach(o => { o.start(t); o.stop(end + .05); });
+}
+function chirp(ok) { if (!ctx) return; const t = ctx.currentTime + .01, o = ctx.createOscillator(), g = ctx.createGain(); o.connect(g); g.connect(ctx.destination); o.frequency.setValueAtTime(ok ? 660 : 330, t); o.frequency.setValueAtTime(ok ? 990 : 250, t + .07); env(g, t, .12, .14); o.start(t); o.stop(t + .2); }
+function click(t, accent, vol = 1) { const o = ctx.createOscillator(), g = ctx.createGain(); o.frequency.value = accent ? 1500 : 1000; o.connect(g); g.connect(ctx.destination); env(g, t, .35 * vol, .05); o.start(t); o.stop(t + .1); }
 const stepDur = () => 60 / S.bpm / 4;
 
 /* ---------- playback ---------- */
-const P = { on: false, timer: 0, next: 0, idx: 0, loop: 1, times: 0, stopAt: 0, q: [] };
-function play(times = 4) {
-  if (!S.pattern) { say('Nothing to play yet', 'Say "record a beat" first.'); return false; }
+const P = { on: false, timer: 0, next: 0, g: 0, loops: 0, times: 0, stopAt: 0, q: [], only: null, click: false };
+function activeParts() { return S.parts.filter((p, i) => (P.only ? P.only.includes(i) : !p.muted)); }
+function play(times = 4, o = {}) {
+  if (!S.parts.length) { say('Nothing to play yet', 'Say "record part 1" first.'); return false; }
   stopPlay(); ctx.resume();
-  Object.assign(P, { on: true, next: ctx.currentTime + .08, idx: 0, loop: 1, times, stopAt: 0, q: [] });
+  const only = o.only !== undefined ? o.only : S.solo;
+  Object.assign(P, { on: true, next: o.from || ctx.currentTime + .08, g: 0, loops: 0, times, stopAt: 0, q: [], only, click: !!o.click });
   P.timer = setInterval(tick, 25); tick(); requestAnimationFrame(drawHead); return true;
 }
 function tick() {
   const sd = stepDur();
   if (P.stopAt && ctx.currentTime >= P.stopAt) { stopPlay(); setStatus(); return; }
-  while (!P.stopAt && P.next < ctx.currentTime + .12) {
-    const st = S.pattern[P.idx], t = P.next + (S.swing && P.idx % 2 ? sd * .28 : 0);
-    for (const id in st) { const snd = S.sounds[id]; if (snd) hit(snd, t, st[id]); }
-    P.q.push({ i: P.idx, t }); P.idx++; P.next += sd;
-    if (P.idx >= S.pattern.length) { P.idx = 0; P.loop++; if (P.times && P.loop > P.times) P.stopAt = P.next + .4; }
+  const act = activeParts(), L = Math.max(16, ...act.map(p => p.len));
+  while (!P.stopAt && P.next < ctx.currentTime + .15) {
+    const t0 = P.next;
+    if (P.click && P.g % 4 === 0) click(t0, P.g % 16 === 0, .5);
+    for (const p of act) {
+      const loc = P.g % p.len, t = t0 + (S.swing && loc % 2 ? sd * .28 : 0);
+      if (p.kind === 'drums') { const st = p.pattern[loc]; for (const id in st) { const s = p.sounds[id]; if (s) drumHit(p, s, t, st[id]); } }
+      else if (p.inst) { for (const n of p.notes) if (n.step === loc) playNote(p, t, n.len * sd, n.midi, n.vel); }
+      else if (loc === 0 && p.take) { const s = ctx.createBufferSource(); s.buffer = p.take; s.playbackRate.value = S.bpm / p.takeBpm; const out = chain(1, p.vol, { tone: p.mods.tone, drive: p.mods.drive, rev: p.mods.rev != null ? p.mods.rev : .1 }); s.connect(out); s.start(t0); s.stop(t0 + p.len * sd); }
+    }
+    P.q.push({ g: P.g, t: t0 }); P.g++; P.next += sd;
+    if (P.g % L === 0) { P.loops++; if (P.times && P.loops >= P.times) P.stopAt = P.next + .5; }
   }
   setStatus();
 }
-function stopPlay() { clearInterval(P.timer); P.on = false; P.q = []; drawGrid(-1); }
+function stopPlay() { clearInterval(P.timer); P.on = false; P.q = []; drawPanel(-1); }
 let lastHead = -2;
 function drawHead() {
   if (!P.on) return;
-  let cur = -1; while (P.q.length && P.q[0].t <= ctx.currentTime) cur = P.q.shift().i;
-  if (cur >= 0 && cur !== lastHead) { lastHead = cur; drawGrid(cur); }
+  let cur = -1; while (P.q.length && P.q[0].t <= ctx.currentTime) cur = P.q.shift().g;
+  if (cur >= 0 && cur !== lastHead) { lastHead = cur; const p = curPart(); if (p) drawPanel(cur % p.len); }
   requestAnimationFrame(drawHead);
 }
-function audition(i) { const s = S.sounds[i]; if (!s) return; ctx.resume(); const was = s.muted; s.muted = false; hit(s, ctx.currentTime + .03, .9); s.muted = was; }
+function audition(p, i) { const s = p.sounds[i]; if (!s) return; ctx.resume(); const was = s.muted; s.muted = false; drumHit(p, s, ctx.currentTime + .03, .9); s.muted = was; }
 
 /* ---------- recording ---------- */
 const wait = ms => new Promise(r => setTimeout(r, ms));
@@ -551,98 +669,162 @@ async function openMic() { micStream = await navigator.mediaDevices.getUserMedia
 function closeMic() { if (micStream) micStream.getTracks().forEach(t => t.stop()); micStream = null; }
 function level(d) { let e = 0; for (let i = 0; i < d.length; i++) e += d[i] * d[i]; return Math.sqrt(e / d.length); }
 
-async function record() {
+// o: { target (index; = parts.length for new), alone, kind, bars, withIdx, calibrate }
+async function record(o) {
   S.busy = true; stopPlay(); pauseListen(); $('light').className = 'light on'; $('meterWrap').hidden = false; S.stopRec = false;
+  const others = S.parts.map((_, i) => i).filter(i => i !== o.target && !S.parts[i].muted);
+  const backing = o.withIdx ? o.withIdx.filter(i => i !== o.target && S.parts[i]) : others;
+  const overdub = o.calibrate || S.parts.some((_, i) => i !== o.target);
+  const num = o.target + 1;
   try {
     await ctx.resume(); await openMic();
     const src = ctx.createMediaStreamSource(micStream), proc = ctx.createScriptProcessor(2048, 1, 1), sink = ctx.createGain();
     sink.gain.value = 0; src.connect(proc); proc.connect(sink); sink.connect(ctx.destination);
-    const chunks = []; let first = null, floor = 1, n = 0, peak = 0, started = false, lastLoud = 0;
-    const startAt = ctx.currentTime + .3; beep(startAt);
+    const chunks = []; let first = null, floor = 1, nf = 0, peak = 0, started = false, lastLoud = 0;
+    const beat = 60 / S.bpm, startAt = ctx.currentTime + .35, T0 = overdub ? startAt + 4 * beat : startAt, listenFrom = overdub ? T0 - beat * .5 : startAt + .12;
+    const fixedEnd = o.calibrate ? T0 + 8 * beat + .3 : o.bars ? T0 + o.bars * 4 * beat + .25 : 0;
     proc.onaudioprocess = e => {
       if (first === null) first = ctx.currentTime - e.inputBuffer.duration;
       const d = new Float32Array(e.inputBuffer.getChannelData(0)); chunks.push(d);
       const rms = level(d), now = ctx.currentTime; $('meter').style.width = Math.min(100, Math.sqrt(rms * 12) * 100) + '%';
-      if (now < startAt + .12) return;
-      if (n < 6) { floor = Math.min(floor, rms); n++; return; }
+      if (now < startAt + .1) return;
+      if (nf < 6) { floor = Math.min(floor, rms); nf++; return; }
+      if (now < listenFrom) return;
       peak = Math.max(peak, rms);
       if (rms > Math.max(floor * 3, .002, peak * .05)) { started = true; lastLoud = now; }
     };
+    if (overdub) {
+      for (let i = 0; i < 4; i++) click(startAt + i * beat, i === 0);
+      const alone = o.alone || o.calibrate || !backing.length;
+      if (alone) play(0, { from: T0, only: [], click: true }); else play(0, { from: T0, only: backing, click: false });
+    } else click(startAt, true);
     while (true) {
       const now = ctx.currentTime;
-      if (S.stopRec || now > startAt + 60 || (started && now - lastLoud > 2) || (!started && now > startAt + 15)) break;
-      setStatus(started ? 'Recording… go quiet to finish' : (now < startAt ? 'Get ready…' : 'Go! Beatbox whenever you\'re ready'), started ? 'Freestyle as long as you like. 2 seconds of quiet ends it.' : 'Waiting to hear you…');
+      if (S.stopRec || now > T0 + 90) break;
+      if (fixedEnd ? now > fixedEnd : ((started && now - lastLoud > 2 && now > T0 + beat * 2) || (!started && now > T0 + 15))) break;
+      if (now < T0 && overdub) setStatus(`${4 - Math.max(0, Math.floor((now - startAt) / beat))}…`, o.calibrate ? 'Then say "ta" right on every click.' : `Part ${num} starts on the next "1".`);
+      else if (now < startAt) setStatus('Get ready…', '');
+      else if (o.calibrate) setStatus('Say "ta" on every click', '');
+      else setStatus(started ? `Recording part ${num}…` : (overdub ? `Go! Part ${num}` : `Go! Beatbox, hum or whistle`), o.bars ? `Recording ${o.bars} bars.` : 'Go quiet for 2 seconds to finish.');
       await wait(50);
     }
-    proc.disconnect(); src.disconnect(); closeMic();
-    setStatus('Listening back…', 'Finding your sounds and the beat.'); await wait(30);
-    const total = chunks.reduce((a, c) => a + c.length, 0), x = new Float32Array(total); let o = 0; for (const c of chunks) { x.set(c, o); o += c.length; }
-    const sr = ctx.sampleRate;
-    let hits = DSP.analyzeSounds(x, sr, null).filter(h => first + h.t > startAt + .08);
-    if (!hits.length) throw new Error('quiet');
-    // renumber groups after filtering, in order of first appearance
-    const order = []; hits.forEach(h => { if (!order.includes(h.type)) order.push(h.type); }); hits.forEach(h => h.type = order.indexOf(h.type));
-    const k = order.length, sounds = [];
-    for (let id = 0; id < k; id++) {
-      const mem = hits.filter(h => h.type === id), best = mem.reduce((a, b) => b.level > a.level ? b : a);
-      const nextOn = hits.find(h => h.t > best.t + .02);
-      const a = Math.max(0, Math.round((best.t - .03) * sr)), b = Math.min(x.length, Math.round(Math.min(best.t + .45, nextOn ? nextOn.t - .03 : 1e9) * sr));
-      const len = Math.max(Math.round(.06 * sr), b - a), buf = ctx.createBuffer(1, len, sr), d = buf.getChannelData(0);
-      let pk = 1e-6; for (let i = 0; i < len; i++) { d[i] = x[a + i] || 0; pk = Math.max(pk, Math.abs(d[i])); }
-      const fi = Math.round(.002 * sr), fo = Math.min(len, Math.round(.03 * sr));
-      for (let i = 0; i < len; i++) { let g = .9 / pk; if (i < fi) g *= i / fi; if (i > len - fo) g *= (len - i) / fo; d[i] *= g; }
-      const votes = {}; mem.forEach(h => votes[h.guess] = (votes[h.guess] || 0) + 1);
-      const guess = Object.keys(votes).sort((p, q) => votes[q] - votes[p])[0];
-      sounds.push(newSound(id, buf, GUESS[guess]));
+    proc.disconnect(); src.disconnect(); closeMic(); stopPlay();
+    setStatus('Listening back…', 'Working out what you did.'); await wait(30);
+    const total = chunks.reduce((a, c) => a + c.length, 0), x = new Float32Array(total); let off = 0; for (const c of chunks) { x.set(c, off); off += c.length; }
+    if (o.calibrate) finishCalibrate(x, first, T0, beat);
+    else {
+      const r = processTake(x, ctx.sampleRate, first, { overdub, startAt, T0, kind: o.kind, bars: o.bars, lat: S.latency, base: S.parts.find((_, i) => i !== o.target) });
+      pushHist();
+      if (r.bpm) { S.bpm = r.bpm; store.set('bpm', S.bpm); }
+      S.parts[o.target] = r.part; S.cur = o.target; S.solo = null;
+      say(`Part ${num}: ${r.part.kind === 'drums' ? r.part.sounds.length + ' sound' + (r.part.sounds.length > 1 ? 's' : '') : r.part.notes.length + ' notes' + (r.part.key ? ' in ' + keyName(r.part.key) : '')}, ${r.part.bars} bar${r.part.bars > 1 ? 's' : ''}${r.bpm ? ' at ' + r.bpm + ' BPM' : ''}`,
+        r.part.kind === 'drums' ? 'Playing it back in your voice. Try "sound 1 is a kick", or "record part ' + (S.parts.length + 1) + '".' : 'Playing your hum back. Try "make it a guitar", or "record part ' + (S.parts.length + 1) + '".');
+      chirp(true); drawAll(); play(2);
     }
-    pushHist();
-    S.lastHits = hits.map(h => ({ time: first + h.t, type: h.type, level: h.level }));
-    S.sounds = sounds; build(null, true);
   } catch (err) {
-    closeMic();
-    if (String(err.message) === 'quiet') say('I didn\'t hear a beat', 'Get closer to the mic, watch the red bar, and say "record a beat" again.');
-    else say('Couldn\'t use the microphone', String(err.message || err));
+    closeMic(); stopPlay();
+    if (String(err.message) === 'quiet') say('I didn\'t hear anything', 'Get closer to the mic, watch the red bar, and try again.');
+    else say('Recording didn\'t work', String(err.message || err));
     chirp(false);
   }
   S.busy = false; $('meterWrap').hidden = true; $('light').className = 'light'; voice('restarting…', false); resumeListen(); setStatus(); drawAll();
 }
+function finishCalibrate(x, first, T0, beat) {
+  const hits = DSP.analyze(x, ctx.sampleRate, null).map(h => first + h.t).filter(t => t > T0 - beat / 2);
+  if (hits.length < 4) { say('Calibration didn\'t catch enough', 'Say "calibrate" and try again a little louder.'); chirp(false); return; }
+  S.latency = Math.max(-.05, Math.min(.4, DSP.beatOffset(hits, T0, beat))); store.set('latency', S.latency);
+  say('Timing calibrated', `Recordings over playback will shift by ${Math.round(S.latency * 1000)} ms.`); chirp(true);
+}
+function fitBars(maxStep, base, lastHitsAtStep0) {
+  let b = Math.max(1, Math.ceil((maxStep + 1) / 16));
+  if (b > 1 && lastHitsAtStep0) b--;
+  if (base) { if (b > base.bars) b = Math.ceil(b / base.bars) * base.bars; else if (base.bars % b) b = base.bars; }
+  return b;
+}
+function newPart(kind) { return { kind, bars: 1, len: 16, muted: false, vol: 1, sounds: [], pattern: [], notes: [], inst: null, label: '', mods: { tone: 1, drive: 0, rev: null, oct: 0, short: false }, key: null, snapOn: true, take: null, takeBpm: S.bpm, hits: null }; }
+// turns a recording into a part
+function processTake(x, sr, first, o) {
+  const tr = DSP.pitchTrack(x, sr);
+  const kind = o.kind || (tr.voiced > .55 && tr.loudTime > .3 ? 'melody' : 'drums');
+  const sd = stepDur(), from = o.overdub ? o.T0 - sd / 2 : o.startAt + .08;
+  const part = newPart(kind); let bpm = null, toStep, origin;
+  if (kind === 'drums') {
+    let hits = DSP.analyzeSounds(x, sr, null).filter(h => first + h.t > from);
+    if (!hits.length) throw new Error('quiet');
+    const order = []; hits.forEach(h => { if (!order.includes(h.type)) order.push(h.type); }); hits.forEach(h => h.type = order.indexOf(h.type));
+    part.sounds = makeClips(x, sr, hits, order.length);
+    const abs = hits.map(h => ({ time: first + h.t, type: h.type, level: h.level }));
+    if (!o.overdub) {
+      const r = DSP.freestyle(abs, S.bpm); if (!r.pat) throw new Error('quiet');
+      part.pattern = r.pat; part.bars = r.bars; bpm = r.bpm; part.hits = abs;
+    } else {
+      const maxL = Math.max(...abs.map(h => h.level)), placed = abs.map(h => [Math.max(0, Math.round((h.time - o.T0 - o.lat) / sd)), h.type, Math.round((.45 + .55 * h.level / maxL) * 100) / 100]);
+      const mx = Math.max(...placed.map(p => p[0])), lastBar = Math.floor(mx / 16);
+      part.bars = o.bars || fitBars(mx, o.base, placed.filter(p => p[0] >= lastBar * 16).every(p => p[0] % 16 === 0) && mx % 16 === 0);
+      part.pattern = Array.from({ length: part.bars * 16 }, () => ({}));
+      for (const [i, ty, v] of placed) if (i < part.pattern.length && v > (part.pattern[i][ty] || 0)) part.pattern[i][ty] = v;
+    }
+  } else {
+    const notes = DSP.notesFrom(tr).map(n => ({ ...n, start: first + n.start, end: first + n.end })).filter(n => n.start > from);
+    if (!notes.length) throw new Error('quiet');
+    if (!o.overdub) {
+      const r = DSP.freestyle(notes.map(n => ({ time: n.start, type: 0, level: n.level })), S.bpm);
+      bpm = r.bpm; const g = r.grid, d = g.length > 1 ? g[g.length - 1] - g[g.length - 2] : 60 / bpm / 4;
+      toStep = t => { let best = 0, bd = Infinity; for (let i = 0; i < g.length; i++) { const dd = Math.abs(g[i] - t); if (dd < bd) { bd = dd; best = i; } } if (t > g[g.length - 1]) best = Math.round((g.length - 1) + (t - g[g.length - 1]) / d); return best; };
+      origin = g[0];
+    } else { toStep = t => Math.round((t - o.T0 - o.lat) / sd); origin = o.T0 + o.lat; }
+    const maxL = Math.max(...notes.map(n => n.level));
+    part.raw = notes.map(n => { const s = Math.max(0, toStep(n.start)); return { step: s, len: Math.max(1, toStep(n.end) - s), m: n.midi, vel: Math.round((.5 + .5 * n.level / maxL) * 100) / 100 }; });
+    const mx = Math.max(...part.raw.map(n => n.step + n.len - 1));
+    part.bars = o.bars || fitBars(mx, o.base, false); part.len = part.bars * 16;
+    part.key = part.raw.length >= 4 ? DSP.findKey(notes) : null;
+    resnap(part);
+    const tb = bpm || S.bpm, dur = part.bars * 16 * 60 / tb / 4, a = Math.max(0, Math.round((origin - first) * sr)), len = Math.max(1, Math.min(x.length - a, Math.round(dur * sr)));
+    part.take = ctx.createBuffer(1, Math.round(dur * sr), sr); const td = part.take.getChannelData(0);
+    let pk = 1e-6; for (let i = 0; i < len; i++) pk = Math.max(pk, Math.abs(x[a + i]));
+    for (let i = 0; i < len; i++) td[i] = x[a + i] * Math.min(1, .8 / pk) * Math.min(1, (len - i) / (sr * .02));
+    part.takeBpm = tb;
+  }
+  part.len = part.bars * 16;
+  if (part.kind === 'drums' && part.pattern.length < part.len) while (part.pattern.length < part.len) part.pattern.push({});
+  return { part, bpm };
+}
+function resnap(p) { p.notes = p.raw.filter(n => n.step < p.len).map(n => ({ step: n.step, len: n.len, vel: n.vel, midi: p.snapOn ? DSP.snap(n.m, p.key) : Math.round(n.m) })); }
+function makeClips(x, sr, hits, k) {
+  const out = [];
+  for (let id = 0; id < k; id++) {
+    const mem = hits.filter(h => h.type === id), best = mem.reduce((a, b) => b.level > a.level ? b : a), nextOn = hits.find(h => h.t > best.t + .02);
+    const a = Math.max(0, Math.round((best.t - .03) * sr)), b = Math.min(x.length, Math.round(Math.min(best.t + .45, nextOn ? nextOn.t - .03 : 1e9) * sr));
+    const len = Math.max(Math.round(.06 * sr), b - a), buf = ctx.createBuffer(1, len, sr), d = buf.getChannelData(0);
+    let pk = 1e-6; for (let i = 0; i < len; i++) { d[i] = x[a + i] || 0; pk = Math.max(pk, Math.abs(d[i])); }
+    const fi = Math.round(.002 * sr), fo = Math.min(len, Math.round(.03 * sr));
+    for (let i = 0; i < len; i++) { let g = .9 / pk; if (i < fi) g *= i / fi; if (i > len - fo) g *= (len - i) / fo; d[i] *= g; }
+    const votes = {}; mem.forEach(h => votes[h.guess] = (votes[h.guess] || 0) + 1);
+    out.push(newSound(id, buf, GUESS[Object.keys(votes).sort((p, q) => votes[q] - votes[p])[0]]));
+  }
+  return out;
+}
 function newSound(id, clip, guess) { return { id, clip, type: null, label: '', mods: blankMods(), style: null, vol: 1, muted: false, guess }; }
 function blankMods() { return { pitch: 1, decay: 1, drive: 0, tone: 1, rev: null, click: 1 }; }
-function build(forceBpm, fresh) {
-  const r = DSP.freestyle(S.lastHits || [], S.bpm, forceBpm);
-  if (!r.pat || !r.used) { say('I didn\'t hear a beat', 'Say "record a beat" again.'); chirp(false); return; }
-  if (!fresh) pushHist();
-  S.pattern = r.pat; S.bpm = r.bpm; S.bars = r.bars; store.set('bpm', S.bpm); drawAll();
-  say(`Found ${S.sounds.length} sound${S.sounds.length > 1 ? 's' : ''}: ${r.bpm} BPM, ${r.bars} bar${r.bars > 1 ? 's' : ''}`, 'Playing it back in your voice. Now try "sound 1 is a kick", or "make them drums".');
-  chirp(true); play(2);
-}
+const keyName = k => k ? KEYN[k.root] + (k.minor ? ' minor' : ' major') : '';
 
 /* ---------- speech ---------- */
 const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
 let recOn = false, needTap = false; const vlog = [];
-function log(ev) { const d = new Date(); vlog.push(ev + ' ' + d.toTimeString().slice(3, 8)); if (vlog.length > 8) vlog.shift(); $('vlog').textContent = 'Voice log: ' + vlog.join(' · '); }
+function log(ev) { vlog.push(ev + ' ' + new Date().toTimeString().slice(3, 8)); if (vlog.length > 8) vlog.shift(); $('vlog').textContent = 'Voice log: ' + vlog.join(' · '); }
 function voice(txt, good) { $('voice').textContent = 'Voice: ' + txt; $('voice').className = 'chip ' + (good ? 'ok' : 'warn'); if (!S.busy) $('light').className = 'light' + (good ? ' listen' : ''); }
 function makeRec() {
   const r = new SR(); r.continuous = true; r.interimResults = false; r.lang = 'en-US';
   r.onstart = () => { if (r !== rec) return; recOn = true; voice('listening', true); log('start'); };
   r.onresult = e => { if (r !== rec) return; for (let i = e.resultIndex; i < e.results.length; i++) if (e.results[i].isFinal) handle(e.results[i][0].transcript); };
-  r.onerror = e => {
-    if (r !== rec) return; log('err:' + e.error);
-    if (e.error === 'no-speech' || e.error === 'aborted') return;
-    voice('error: ' + e.error, false);
-    if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { needTap = true; $('tapResume').hidden = false; }
-  };
+  r.onerror = e => { if (r !== rec) return; log('err:' + e.error); if (e.error === 'no-speech' || e.error === 'aborted') return; voice('error: ' + e.error, false); if (e.error === 'not-allowed' || e.error === 'service-not-allowed') { needTap = true; $('tapResume').hidden = false; } };
   r.onend = () => { if (r !== rec) return; recOn = false; log('end'); if (wantListen && !S.busy && !needTap) { voice('restarting…', false); setTimeout(startRec, 300); } };
   return r;
 }
-function startRec() {
-  if (!SR || recOn || !wantListen || S.busy || needTap) return;
-  try { rec = makeRec(); rec.start(); } catch (err) { log('startfail'); voice('couldn\'t start: ' + (err.message || err), false); }
-}
+function startRec() { if (!SR || recOn || !wantListen || S.busy || needTap) return; try { rec = makeRec(); rec.start(); } catch (err) { log('startfail'); voice('couldn\'t start: ' + (err.message || err), false); } }
 function startListen() {
   if (!SR) { $('srWarn').textContent = 'This browser has no speech recognition, so voice commands are off. Use Chrome, or use the backup buttons.'; $('voice').textContent = 'Voice: not supported'; return; }
-  resumeListen();
-  setInterval(() => { if (wantListen && !S.busy && !recOn && !needTap) startRec(); }, 2500);
+  resumeListen(); setInterval(() => { if (wantListen && !S.busy && !recOn && !needTap) startRec(); }, 2500);
 }
 function pauseListen() { wantListen = false; recOn = false; const r = rec; rec = null; if (r) try { r.abort(); } catch {} }
 function resumeListen() { wantListen = true; setTimeout(startRec, 400); }
@@ -650,105 +832,182 @@ function tapResume() { needTap = false; $('tapResume').hidden = true; wantListen
 
 /* ---------- commands ---------- */
 function num(str) { const m = str.match(/\b(\d+)\b/); if (m) return +m[1]; for (const w of str.split(/\s+/)) if (NUM[w]) return NUM[w]; return null; }
-function pushHist() { S.hist.push({ pattern: S.pattern && JSON.parse(JSON.stringify(S.pattern)), sounds: S.sounds.map(s => ({ ...s, mods: { ...s.mods } })), lastHits: S.lastHits && S.lastHits.map(h => ({ ...h })), bpm: S.bpm, bars: S.bars }); if (S.hist.length > 40) S.hist.shift(); }
-function inst(t) { for (const [r, k] of INST_WORDS) if (r.test(t)) return k; return null; }
-function styleIn(t) { for (const [r, k] of STYLE_WORDS) if (r.test(t)) return k; return null; }
-function descMods(t, m) { let any = false; for (const [r, d] of DESC) if (r.test(t)) { any = true; for (const k in d) { if (k === 'rev') m.rev = d.rev; else if (k === 'drive') m.drive = Math.min(1, m.drive + d.drive); else m[k] *= d[k]; } } return any; }
-const REF = '(?:sound|noise|number|row|track|sample)s? ?(?:number )?(\\d+|one|won|two|to|too|three|tree|four|for|five|six)\\b';
-function refNum(w) { return (/\d/.test(w) ? +w : NUM[w]) - 1; }
-function soundRef(t) {
-  let m = t.match(new RegExp('\\b' + REF));
-  if (m) return refNum(m[1]);
-  m = t.match(/\b(first|second|third|fourth|fifth|sixth) (?:sound|noise|one)\b/);
-  return m ? NUM[m[1]] - 1 : null;
+const refNum = w => (/\d/.test(w) ? +w : NUM[w]) - 1;
+function pushHist() {
+  S.hist.push({ parts: S.parts.map(p => ({ ...p, mods: { ...p.mods }, sounds: p.sounds.map(s => ({ ...s, mods: { ...s.mods } })), pattern: JSON.parse(JSON.stringify(p.pattern)), notes: p.notes.map(n => ({ ...n })), raw: p.raw && p.raw.map(n => ({ ...n })), hits: p.hits && p.hits.map(h => ({ ...h })) })), cur: S.cur, solo: S.solo, bpm: S.bpm, style: S.style });
+  if (S.hist.length > 40) S.hist.shift();
 }
-function nameOf(s) { return s.type ? (s.label || NAMES[s.type]) : 'your voice'; }
+const inst = t => { for (const [r, k] of INST_WORDS) if (r.test(t)) return k; return null; };
+const melInst = t => { for (const [r, k] of MEL_WORDS) if (r.test(t)) return k; return null; };
+const styleIn = t => { for (const [r, k] of STYLE_WORDS) if (r.test(t)) return k; return null; };
+function descMods(t, m, only) { let any = false; for (const [r, d] of DESC) if (r.test(t)) { for (const k in d) { if (only && !only.includes(k)) continue; any = true; if (k === 'rev') m.rev = d.rev; else if (k === 'drive') m.drive = Math.min(1, m.drive + d.drive); else m[k] *= d[k]; } } return any; }
+const SREF = new RegExp('\\b(?:sound|noise|sample)s? ?(?:number )?' + NUMW + '\\b');
+function soundRef(t) { let m = t.match(SREF); if (m) return refNum(m[1]); m = t.match(/\b(first|second|third|fourth|fifth|sixth) (?:sound|noise)\b/); return m ? NUM[m[1]] - 1 : null; }
+function partRefs(t) { return [...t.matchAll(new RegExp('\\bparts? ?(?:number )?' + NUMW + '(?:\\s*(?:and|&|plus|with)\\s*(?:part )?' + NUMW + ')?\\b', 'g'))].flatMap(m => [m[1], m[2]].filter(Boolean).map(refNum)); }
+function partRef(t) { const r = partRefs(t); if (r.length) return r[0]; const m = t.match(/\b(first|second|third|fourth|fifth|sixth) part\b/); return m ? NUM[m[1]] - 1 : null; }
+const sndName = s => s.type ? (s.label || NAMES[s.type]) : 'your voice';
+const partName = p => p.kind === 'drums' ? 'Drums' : (p.inst ? (p.label || MNAMES[p.inst]) : 'Hum, your voice');
+const lastOf = kind => { for (let i = S.parts.length - 1; i >= 0; i--) if (S.parts[i].kind === kind) return i; return -1; };
 
 function handle(raw) {
   const t = raw.toLowerCase().replace(/[.,!?]/g, '').replace(/-/g, ' ').replace(/\s+/g, ' ').trim();
   if (!t || S.busy) return;
   $('heardQ').textContent = `"${raw.trim()}"`;
   let r; try { r = interpret(t); } catch (e) { r = 'Something went wrong: ' + e.message; }
-  if (r) { $('heardA').textContent = r; chirp(true); } else { $('heardA').textContent = 'Didn\'t catch a command there. Try "sound 1 is a kick", "play", or "stop".'; chirp(false); }
+  if (r) { $('heardA').textContent = r; chirp(true); } else { $('heardA').textContent = 'Didn\'t catch a command there. Try "record part 2", "play", or "stop".'; chirp(false); }
   setStatus(); drawAll();
 }
 function interpret(t) {
   let m, i;
-  if (/\b(record|new beat|redo)\b/.test(t)) { record(); return 'Recording: beatbox after the beep'; }
-  if (/\b(stop|pause|quiet|silence|shut up|enough)\b/.test(t) && !/sound|noise/.test(t)) { stopPlay(); return 'Stopped'; }
-  if (/\bundo\b|go back/.test(t)) { const h = S.hist.pop(); if (!h) return 'Nothing to undo'; Object.assign(S, h); return 'Undone'; }
-  if (/\b(clear|start over|delete everything|wipe)\b/.test(t)) { pushHist(); S.pattern = null; S.sounds = []; S.lastHits = null; stopPlay(); return 'Cleared'; }
-  if (/\b(make|turn) (them|it|everything|all)( all)? (into )?(drums|real drums)|auto ?drums|\bauto\b/.test(t)) {
-    if (!S.sounds.length) return 'Record a beat first'; pushHist();
-    const used = new Set();
-    S.sounds.forEach(s => { let g = s.guess || 'snare'; if (used.has(g)) g = { kick: 'tom', snare: 'clap', hat: 'shaker' }[g] || g; used.add(g); s.type = g; s.mods = blankMods(); s.label = ''; });
-    if (!P.on) play(2); return 'Gave every sound a drum. Change any of them, like "sound 2 is a clap".';
+  const pr = partRef(t), sr = soundRef(t);
+  if (/\bcalibrat|sync (the )?timing|fix (the )?timing/.test(t)) { record({ target: S.parts.length, calibrate: true }); return 'Calibrating: say "ta" on each click'; }
+  if (/\b(record|re record|rerecord|redo|new part|next part|another part)\b/.test(t)) {
+    const prT = partRef(t.split(/\bwith\b/)[0]);
+    let target = prT != null ? Math.min(prT, S.parts.length) : (/\b(redo|again|re record|rerecord)\b/.test(t) && S.parts.length ? S.cur : S.parts.length);
+    const refs = partRefs(t), w = t.match(/\bwith (?:only |just )?part/) ? refs.filter(x => x !== target) : null;
+    const kind = /melody|hum|whistle|tune|sing|song|bass ?line|riff|chords?|harmony|lead/.test(t) ? 'melody' : /\b(beat|drums?|beatbox|rhythm|percussion|groove)\b/.test(t) ? 'drums' : null;
+    const bm = t.match(new RegExp(NUMW + ' (?:bars?|measures?)')), bars = bm ? Math.max(1, Math.min(32, refNum(bm[1]) + 1)) : null;
+    const alone = /\b(alone|by itself|on its own|without|no other|nothing (else )?playing|no music|just (the |a )?click|in silence|solo)\b/.test(t);
+    record({ target, alone, kind, bars, withIdx: w && w.length ? w : null });
+    return `Recording part ${target + 1}${alone ? ' with just a click' : w && w.length ? ' over part ' + w.map(x => x + 1).join(' and ') : S.parts.some((_, k) => k !== target) ? ' over the other parts' : ''}`;
   }
-  let sid = soundRef(t);
-  // "make the kick deeper": the sound already set to that drum
-  if (sid == null && (i = inst(t))) { const f = S.sounds.find(s => s.type === i); if (f) sid = f.id; }
-  if (sid != null) return soundCmd(t, sid);
+  if (/\b(stop|pause|quiet|silence|shut up|enough)\b/.test(t) && pr == null && sr == null) { stopPlay(); return 'Stopped'; }
+  if (/\bundo\b|go back/.test(t)) { const h = S.hist.pop(); if (!h) return 'Nothing to undo'; Object.assign(S, h); return 'Undone'; }
+  if (/\b(clear|start over|delete|wipe) (everything|all|it all)\b|start over/.test(t)) { pushHist(); S.parts = []; S.cur = 0; S.solo = null; stopPlay(); return 'Cleared everything'; }
+  if (pr != null && sr == null && /\b(delete|remove|erase|get rid of|throw out)\b/.test(t)) { if (!S.parts[pr]) return noPart(pr); pushHist(); S.parts.splice(pr, 1); S.cur = Math.max(0, Math.min(S.cur, S.parts.length - 1)); S.solo = null; stopPlay(); return `Deleted part ${pr + 1}. Later parts moved up a number.`; }
+  if (pr != null && /\b(go to|edit|select|switch to|open|work on|back to|focus on|show|change)\b/.test(t) && !melInst(t) && sr == null && !inst(t)) { if (!S.parts[pr]) return noPart(pr); S.cur = pr; return `Part ${pr + 1} is open`; }
+  // listening to parts
+  if (/\b(play|hear|listen|loop|repeat)\b/.test(t) && sr == null) {
+    const refs = partRefs(t).filter(k => S.parts[k]), n = (m = t.match(new RegExp(NUMW + ' times'))) ? refNum(m[1]) + 1 : null, forever = /forever|keep|nonstop|infinite/.test(t);
+    const times = forever ? 0 : (n || 4);
+    if (refs.length && !/everything|all\b|whole|together with everything/.test(t)) { S.solo = refs; if (!play(times)) return 'Nothing to play yet'; return `Playing part ${refs.map(k => k + 1).join(' and ')}${refs.length === 1 ? ' only' : ''}`; }
+    S.solo = null; return play(times) ? (forever ? 'Looping everything until you say stop' : `Playing everything ${times} times`) : 'Nothing to play yet';
+  }
+  // part-level mix
+  if (pr != null && sr == null && !melInst(t) && !inst(t)) {
+    const p = S.parts[pr]; if (!p) return noPart(pr);
+    if (/\b(unmute|bring back|turn on|add back)\b/.test(t)) { pushHist(); p.muted = false; return `Part ${pr + 1} back on`; }
+    if (/\b(mute|turn off|silence|stop|drop|kill|take out)\b/.test(t)) { pushHist(); p.muted = true; return `Part ${pr + 1} muted`; }
+    if (/\b(louder|turn up|boost|volume up)\b/.test(t)) { pushHist(); p.vol = Math.min(3, p.vol * 1.4); return `Part ${pr + 1} louder`; }
+    if (/\b(quieter|turn down|softer|volume down)\b/.test(t)) { pushHist(); p.vol = Math.max(.1, p.vol / 1.4); return `Part ${pr + 1} quieter`; }
+    if (/\b(late|later|behind|lagging|slow)\b/.test(t)) { pushHist(); nudge(p, -1); return `Moved part ${pr + 1} a little earlier`; }
+    if (/\b(early|earlier|ahead|rushing)\b/.test(t)) { pushHist(); nudge(p, 1); return `Moved part ${pr + 1} a little later`; }
+  }
+  // which part do content commands go to?
+  const mi = melInst(t), di = inst(t);
+  let target = pr != null ? pr : S.cur;
+  const tp = S.parts[target];
+  if (pr == null && tp) {
+    if ((sr != null || di || /\b(make|turn) (them|it|everything|all)( all)? (into )?drums\b/.test(t)) && tp.kind !== 'drums' && !mi) { const k = lastOf('drums'); if (k >= 0) target = k; }
+    else if ((mi || /snap|auto ?tune|exact notes|octave|my voice|\bhum\b|in key/.test(t)) && sr == null && tp.kind !== 'melody') { const k = lastOf('melody'); if (k >= 0) target = k; }
+  }
+  const p = S.parts[target];
+  if (p) {
+    if (pr != null && !S.parts[pr]) return noPart(pr);
+    if (mi && sr == null && p.kind === 'drums' && !di) return `Part ${target + 1} is drums. Instruments like ${MNAMES[mi]} go on a hummed part: say "record a melody".`;
+    const r = p.kind === 'drums' ? drumCmd(t, p, target) : melodyCmd(t, p, target);
+    if (r) { S.cur = target; return r; }
+  }
+  // global
   const st = styleIn(t);
-  if (st && /sound|make|kit|drums|switch|use|like|change|try|go|style|all|everything|it\b/.test(t)) { S.style = st; store.set('style', st); S.sounds.forEach(s => s.style = null); if (S.pattern && !P.on) play(2); return `${STYLES[st].name} style on every drum` + (S.sounds.some(s => !s.type) ? '. Sounds still in your voice need a drum first: say "make them drums".' : ''); }
+  if (st && /sound|make|kit|drums|switch|use|like|change|try|go|style|all|everything|it\b/.test(t)) { S.style = st; store.set('style', st); S.parts.forEach(q => q.sounds.forEach(s => s.style = null)); if (S.parts.length && !P.on) play(2); return `${STYLES[st].name} style on every drum` + (S.parts.some(q => q.sounds.some(s => !s.type)) ? '. Sounds still in your voice need a drum first: say "make them drums".' : ''); }
   if ((m = t.match(/(tempo|bpm|speed)\D*(\d+)/)) || (m = t.match(/(\d+)\s*(bpm|beats per minute)/))) { const v = +(/\d/.test(m[2]) ? m[2] : m[1]); S.bpm = Math.max(40, Math.min(220, v)); store.set('bpm', S.bpm); return `Tempo ${S.bpm} BPM`; }
   if (/\b(faster|speed up|quicker)\b/.test(t)) { S.bpm = Math.min(220, S.bpm + 10); return `Tempo ${S.bpm} BPM`; }
   if (/\b(slower|slow down)\b/.test(t)) { S.bpm = Math.max(40, S.bpm - 10); return `Tempo ${S.bpm} BPM`; }
-  if (/half ?time|half speed|too fast/.test(t)) { if (!S.lastHits) return 'Record a beat first'; build(Math.max(40, S.bpm / 2)); return 'Re-read at half time'; }
-  if (/double ?time|double speed|too slow/.test(t)) { if (!S.lastHits) return 'Record a beat first'; build(Math.min(220, S.bpm * 2)); return 'Re-read at double time'; }
-  if (/\bdouble (it|the)\b|twice as long/.test(t)) { if (!S.pattern) return 'Nothing to double yet'; pushHist(); S.pattern = S.pattern.concat(JSON.parse(JSON.stringify(S.pattern))); S.bars = S.pattern.length / 16; return `Doubled to ${S.bars} bars`; }
-  if (/\b(bars?|measures?)\b/.test(t) && (m = num(t))) {
-    if (!S.pattern) return 'Record a beat first'; const nb = Math.max(1, Math.min(16, m));
-    pushHist(); const old = S.pattern, len = nb * 16; S.pattern = Array.from({ length: len }, (_, i) => ({ ...old[i % old.length] })); S.bars = nb; if (!P.on) play(2);
-    return `Now ${nb} bar${nb > 1 ? 's' : ''}${len > old.length ? ', repeating your beat to fill it' : len < old.length ? ', trimmed' : ''}`; }
+  if (/half ?time|half speed|double ?time|double speed/.test(t)) {
+    const half = /half/.test(t), p0 = S.parts[0];
+    if (S.parts.length === 1 && p0.kind === 'drums' && p0.hits) { const r = DSP.freestyle(p0.hits, S.bpm, half ? Math.max(40, S.bpm / 2) : Math.min(220, S.bpm * 2)); pushHist(); p0.pattern = r.pat; p0.bars = r.bars; p0.len = r.bars * 16; S.bpm = r.bpm; play(2); return `Re-read at ${half ? 'half' : 'double'} time: ${S.bpm} BPM`; }
+    pushHist(); S.bpm = Math.round(half ? Math.max(40, S.bpm / 2) : Math.min(220, S.bpm * 2)); return `Tempo ${S.bpm} BPM`;
+  }
   if (/no swing|straight|remove (the )?swing/.test(t)) { S.swing = false; return 'Swing off'; }
   if (/swing|shuffle/.test(t)) { S.swing = true; return 'Swing on'; }
-  if (/\b(add|more|put in|fill)\b/.test(t) && (i = inst(t))) {
-    if (!S.pattern) return 'Record a beat first'; pushHist();
-    const id = S.sounds.length; S.sounds.push({ ...newSound(id, null, i), type: i });
-    S.pattern.forEach((p, n) => { if ((i === 'hat' || i === 'shaker') ? n % 2 === 0 : i === 'kick' ? n % 4 === 0 : n % 8 === 4) p[id] = .65; });
-    if (!P.on) play(2); return `Added a ${NAMES[i]} as sound ${id + 1}`;
-  }
-  if (/\b(loop|repeat)\b/.test(t)) { const n = num(t); if (/forever|keep|nonstop|infinite/.test(t)) return play(0) ? 'Looping until you say stop' : 'Nothing to loop yet'; return play(n || 4) ? `Looping ${n || 4} times` : 'Nothing to loop yet'; }
-  if (/\b(play|start|hear|listen|go)\b/.test(t)) return play(4) ? 'Playing 4 times' : 'Nothing to play yet';
   if (/help|what can i say/.test(t)) return 'The command list is further down the page.';
   return null;
 }
-function soundCmd(t, sid) {
-  const s = S.sounds[sid]; if (!s) return `There's no sound ${sid + 1}. I found ${S.sounds.length}.`;
-  if (/merge|same as|combine|join/.test(t)) {
-    const nums = [...t.matchAll(new RegExp('\\b' + REF, 'g'))].map(x => refNum(x[1]));
-    if (nums.length < 2) return 'Say which two, like "merge sound 3 into sound 1"';
-    return merge(nums[0], nums[1]);
+const noPart = k => `There's no part ${k + 1} yet. There ${S.parts.length === 1 ? 'is 1 part' : 'are ' + S.parts.length + ' parts'}.`;
+function nudge(p, dir) {
+  if (p.kind === 'drums') { if (dir < 0) p.pattern.push(p.pattern.shift()); else p.pattern.unshift(p.pattern.pop()); }
+  else { p.raw.forEach(n => n.step = (n.step + dir + p.len) % p.len); resnap(p); }
+}
+function resize(p, nb) {
+  const old = p.len, len = nb * 16;
+  if (p.kind === 'drums') p.pattern = Array.from({ length: len }, (_, i) => ({ ...p.pattern[i % old] }));
+  else { const out = []; for (let k = 0; k * old < len; k++) for (const n of p.raw) if (n.step + k * old < len) out.push({ ...n, step: n.step + k * old }); p.raw = out; }
+  p.bars = nb; p.len = len; if (p.kind === 'melody') resnap(p);
+  return `Part now ${nb} bar${nb > 1 ? 's' : ''}${len > old ? ', repeating to fill it' : len < old ? ', trimmed' : ''}`;
+}
+function barsCmd(t, p, k) {
+  const m = t.match(new RegExp(NUMW + ' (?:bars?|measures?)')); if (!m) return null;
+  pushHist(); const r = resize(p, Math.max(1, Math.min(32, refNum(m[1]) + 1))); if (!P.on) play(2); return `Part ${k + 1}: ${r.toLowerCase()}`;
+}
+function melodyCmd(t, p, k) {
+  const tag = `Part ${k + 1}`, b = barsCmd(t, p, k); if (b) return b;
+  if (/my voice|original|\bhum\b|back to (normal|me)|as it was/.test(t)) { pushHist(); p.inst = null; p.label = ''; if (!P.on) play(2); return `${tag} is your hum again`; }
+  if (/(no|turn off|without|don't|stop) (the )?(snap|key|auto ?tune|fixing)|chromatic|exact notes/.test(t)) { pushHist(); p.snapOn = false; resnap(p); if (!P.on) play(2); return `${tag}: exact notes, no snapping`; }
+  if (/\b(snap|in key|auto ?tune|fix (the )?notes|turn on (the )?snap)\b/.test(t)) { pushHist(); p.snapOn = true; resnap(p); if (!P.on) play(2); return `${tag}: notes snapped to ${keyName(p.key) || 'the nearest note'}`; }
+  if (/\b(louder|turn up|boost|volume up)\b/.test(t)) { pushHist(); p.vol = Math.min(3, p.vol * 1.4); return `${tag} louder`; }
+  if (/\b(quieter|turn down|volume down)\b/.test(t)) { pushHist(); p.vol = Math.max(.1, p.vol / 1.4); return `${tag} quieter`; }
+  pushHist(); let changed = false;
+  const mi = melInst(t);
+  if (mi) { p.inst = mi; p.mods = { tone: 1, drive: 0, rev: null, oct: 0, short: false }; changed = true; if (/cello|\bbass\b/.test(t) && mi === 'strings') p.mods.oct = -1; }
+  if (/octave (up|higher)|up an octave|\bhigher\b/.test(t)) { p.mods.oct = Math.min(2, p.mods.oct + 1); changed = true; }
+  if (/octave (down|lower)|down an octave|\blower\b|\bdeeper\b/.test(t)) { p.mods.oct = Math.max(-2, p.mods.oct - 1); changed = true; }
+  if (/\b(short|staccato|choppy|plucky|stabby)\b/.test(t)) { p.mods.short = true; changed = true; }
+  if (/\b(legato|smooth|connected|held|long notes)\b/.test(t)) { p.mods.short = false; changed = true; }
+  if (descMods(t.replace(/\b(short|long notes|higher|lower|deeper)\b/g, ''), p.mods, ['tone', 'drive', 'rev'])) changed = true;
+  if (!changed) { S.hist.pop(); return null; }
+  if (mi) { const words = t.replace(/\b(make|it|the|a|an|is|be|into|turn|like|sound|sounds|part|melody|tune|hum|change|to|now|please|play|with|and|\d+|one|two|three|four|for|too)\b/g, ' ').replace(/\s+/g, ' ').trim(); p.label = words && words !== MNAMES[mi] && words.length < 40 ? words : ''; }
+  if (!P.on) play(2);
+  return mi ? `${tag} is now ${p.label || 'a ' + MNAMES[mi]}${p.mods.oct ? ', octave ' + (p.mods.oct > 0 ? 'up' : 'down') : ''}` : (p.inst ? `${tag} reshaped` : `${tag} reshaped. Pick an instrument too, like "make it a flute".`);
+}
+function drumCmd(t, p, k) {
+  const b = barsCmd(t, p, k); if (b) return b;
+  if (/\b(make|turn) (them|it|everything|all)( all)? (into )?(drums|real drums)|auto ?drums|\bauto\b/.test(t)) {
+    pushHist(); const used = new Set();
+    p.sounds.forEach(s => { if (!s.clip) return; let g = s.guess || 'snare'; if (used.has(g)) g = { kick: 'tom', snare: 'clap', hat: 'shaker' }[g] || g; used.add(g); s.type = g; s.mods = blankMods(); s.label = ''; });
+    if (!P.on) play(2); return `Part ${k + 1}: gave every sound a drum. Change any, like "sound 2 is a clap".`;
   }
+  if (/\b(add|put in|fill)\b/.test(t) && inst(t) && soundRef(t) == null) {
+    const i = inst(t); pushHist(); const id = p.sounds.length; p.sounds.push({ ...newSound(id, null, i), type: i });
+    p.pattern.forEach((q, n) => { if ((i === 'hat' || i === 'shaker') ? n % 2 === 0 : i === 'kick' ? n % 4 === 0 : n % 8 === 4) q[id] = .65; });
+    if (!P.on) play(2); return `Added a ${NAMES[i]} to part ${k + 1} as sound ${id + 1}`;
+  }
+  let sid = soundRef(t), i;
+  if (sid == null && (i = inst(t))) { const f = p.sounds.find(s => s.type === i); if (f) sid = f.id; else if (/\b(make|more|less|the)\b/.test(t)) return `No sound in part ${k + 1} is a ${NAMES[i]} yet. Say "sound 2 is a ${NAMES[i]}" first.`; }
+  if (sid == null) return null;
+  return soundCmd(t, p, sid);
+}
+function soundCmd(t, p, sid) {
+  const s = p.sounds[sid]; if (!s) return `There's no sound ${sid + 1}. That part has ${p.sounds.length}.`;
+  if (/merge|same as|combine|join/.test(t)) { const nums = [...t.matchAll(new RegExp(SREF.source, 'g'))].map(x => refNum(x[1])); if (nums.length < 2) return 'Say which two, like "merge sound 3 into sound 1"'; return merge(p, nums[0], nums[1]); }
   if (/\b(unmute|bring back|turn on)\b/.test(t)) { pushHist(); s.muted = false; return `Sound ${sid + 1} is back`; }
   if (/\b(mute|remove|delete|drop|get rid|turn off|kill)\b/.test(t)) { pushHist(); s.muted = true; return `Sound ${sid + 1} muted. Say "bring back sound ${sid + 1}" to undo.`; }
   if (/\b(louder|turn up|boost|volume up)\b/.test(t)) { pushHist(); s.vol = Math.min(3, s.vol * 1.4); return `Sound ${sid + 1} louder`; }
   if (/\b(quieter|turn down|volume down)\b/.test(t)) { pushHist(); s.vol = Math.max(.15, s.vol / 1.4); return `Sound ${sid + 1} quieter`; }
-  if (/my voice|original|\bmouth\b|back to (normal|me)|unassign|as it was/.test(t)) { pushHist(); s.type = null; s.mods = blankMods(); s.style = null; s.label = ''; if (!P.on) play(2); return `Sound ${sid + 1} is your voice again`; }
-  // only treat a drum word as a NEW drum when it's said about a numbered sound ("sound 2 is a clap"), not "make the kick deeper"
+  if (/my voice|original|\bmouth\b|back to (normal|me)|unassign|as it was/.test(t)) { if (!s.clip) return 'That sound was added, so it has no voice version'; pushHist(); s.type = null; s.mods = blankMods(); s.style = null; s.label = ''; if (!P.on) play(2); return `Sound ${sid + 1} is your voice again`; }
   const named = soundRef(t) != null, ty = named ? inst(t) : null;
-  if (/\b(play|hear|listen|solo|what is|whats)\b/.test(t) && !ty) { audition(sid); return `That's sound ${sid + 1}: ${nameOf(s)}`; }
+  if (/\b(play|hear|listen|solo|what is|whats)\b/.test(t) && !ty) { audition(p, sid); return `That's sound ${sid + 1}: ${sndName(s)}`; }
   if (ty) {
     pushHist(); s.type = ty; s.mods = blankMods(); s.style = styleIn(t); descMods(t, s.mods);
-    const words = t.replace(new RegExp('^.*?\\b' + REF), '').replace(/\b(is|be|should|make|it|into|a|an|the|turn|like|sound|to|sounds|change|set|as|please|kind of|sort of|want|i|of|now|can|you|first|second|third|fourth|fifth|sixth|one|with a|and)\b/g, ' ').replace(/\s+/g, ' ').trim();
+    const words = t.replace(new RegExp('^.*?' + SREF.source), '').replace(/\b(is|be|should|make|it|into|a|an|the|turn|like|sound|to|sounds|change|set|as|please|kind of|sort of|want|i|of|now|can|you|first|second|third|fourth|fifth|sixth|one|with a|and|part \S+)\b/g, ' ').replace(/\s+/g, ' ').trim();
     s.label = words.length > 2 && words.length < 40 && words !== NAMES[ty] ? words : '';
     if (!P.on) play(2); return `Sound ${sid + 1} is now ${s.label || ('a ' + NAMES[ty])}${s.style ? ' (' + STYLES[s.style].name + ' style)' : ''}`;
   }
   const st = styleIn(t); pushHist();
   const changed = descMods(t, s.mods) || !!st; if (st) s.style = st;
-  if (changed) { const extra = t.replace(/\b(make|the|sound|noise|it|a|bit|little|more|er|kick|snare|clap|hat|hi|high|tom|rim|crash|cowbell|shaker|\d+|one|two|three|four|five|six|to|too|for)\b/g, ' ').replace(/\s+/g, ' ').trim(); if (s.type && extra) s.label = ((s.label && s.label !== NAMES[s.type]) ? s.label + ', ' : '') + extra + (s.label ? '' : ' ' + NAMES[s.type]); if (!P.on) play(2); return `Reshaped sound ${sid + 1}: ${nameOf(s)}`; }
+  if (changed) { const extra = t.replace(/\b(make|the|sound|noise|it|a|bit|little|more|er|kick|snare|clap|hat|hi|high|tom|rim|crash|cowbell|shaker|\d+|one|two|three|four|five|six|to|too|for|part)\b/g, ' ').replace(/\s+/g, ' ').trim(); if (s.type && extra) s.label = ((s.label && s.label !== NAMES[s.type]) ? s.label + ', ' : '') + extra + (s.label ? '' : ' ' + NAMES[s.type]); if (!P.on) play(2); return `Reshaped sound ${sid + 1}: ${sndName(s)}`; }
   S.hist.pop();
   return `What should sound ${sid + 1} be? Try "sound ${sid + 1} is a kick".`;
 }
-function merge(from, into) {
-  const a = S.sounds[from], b = S.sounds[into]; if (!a || !b || from === into) return 'Those need to be two different sounds';
+function merge(p, from, into) {
+  if (!p.sounds[from] || !p.sounds[into] || from === into) return 'Those need to be two different sounds';
   pushHist();
-  S.pattern.forEach(p => { if (p[from]) { p[into] = Math.max(p[into] || 0, p[from]); } delete p[from]; });
-  if (S.lastHits) S.lastHits.forEach(h => { if (h.type === from) h.type = into; });
-  const keep = S.sounds.filter((_, i) => i !== from), map = {}; S.sounds.forEach((s, i) => { if (i !== from) map[i] = keep.indexOf(s); });
-  S.pattern = S.pattern.map(p => { const q = {}; for (const k in p) q[map[k]] = p[k]; return q; });
-  if (S.lastHits) S.lastHits.forEach(h => h.type = map[h.type]);
-  keep.forEach((s, i) => s.id = i); S.sounds = keep;
+  p.pattern.forEach(q => { if (q[from]) q[into] = Math.max(q[into] || 0, q[from]); delete q[from]; });
+  if (p.hits) p.hits.forEach(h => { if (h.type === from) h.type = into; });
+  const keep = p.sounds.filter((_, i) => i !== from), map = {}; p.sounds.forEach((s, i) => { if (i !== from) map[i] = keep.indexOf(s); });
+  p.pattern = p.pattern.map(q => { const o = {}; for (const kk in q) o[map[kk]] = q[kk]; return o; });
+  if (p.hits) p.hits.forEach(h => h.type = map[h.type]);
+  keep.forEach((s, i) => s.id = i); p.sounds = keep;
   return `Merged. Now ${keep.length} sound${keep.length > 1 ? 's' : ''}.`;
 }
 
@@ -758,32 +1017,41 @@ function say(a, b) { override = [a, b]; $('heardA').textContent = b; clearTimeou
 function setStatus(a, b) {
   if (a) { $('status').textContent = a; $('sub').textContent = b || ''; return; }
   if (override) { $('status').textContent = override[0]; $('sub').textContent = override[1]; return; }
-  if (P.on) { $('status').textContent = P.times ? `Playing, loop ${Math.min(P.loop, P.times)} of ${P.times}` : 'Playing on loop'; $('sub').textContent = `${S.bpm} BPM. Say "stop" anytime.`; }
-  else { $('status').textContent = S.pattern ? 'Say "sound 1 is a kick", or "play"' : 'Say "record a beat"'; $('sub').textContent = recOn ? 'Listening for commands.' : 'If voice stops, tap anywhere on the page to wake it.'; }
+  if (P.on) { const who = P.only ? (P.only.length ? 'part ' + P.only.map(k => k + 1).join(' and ') : 'click') : 'everything'; $('status').textContent = `Playing ${who}${P.times ? `, loop ${Math.min(P.loops + 1, P.times)} of ${P.times}` : ' on loop'}`; $('sub').textContent = `${S.bpm} BPM. Say "stop" anytime.`; }
+  else { $('status').textContent = !S.parts.length ? 'Say "record part 1"' : `Say "record part ${S.parts.length + 1}", or "play"`; $('sub').textContent = recOn ? 'Listening for commands.' : 'If voice stops, tap anywhere on the page to wake it.'; }
 }
-function drawAll() { drawSounds(); drawGrid(-1); drawChips(); }
-function esc(v) { return String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]); }
-function drawSounds() {
-  $('sounds').innerHTML = S.sounds.map((s, i) => `<button class="snd${s.muted ? ' muted' : ''}" data-snd="${i}"><span class="dot" style="background:${COLORS[i % 6]}">${i + 1}</span><span><b>Sound ${i + 1}: ${esc(nameOf(s))}</b><small>${s.muted ? 'muted · ' : ''}${s.type ? (s.style ? STYLES[s.style].name + ' · ' : '') : (s.guess ? 'a bit like a ' + NAMES[s.guess] + ' · ' : '')}tap to hear</small></span></button>`).join('');
+const esc = v => String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+function drawAll() { drawParts(); drawPanel(-1); drawChips(); }
+function drawParts() {
+  $('parts').innerHTML = S.parts.map((p, i) => `<button class="part${i === S.cur ? ' cur' : ''}${p.muted ? ' muted' : ''}" data-part="${i}"><b><span class="tag" style="background:${COLORS[i % 6]}"></span>Part ${i + 1}</b><small>${esc(partName(p))}${p.kind === 'drums' ? ' · ' + p.sounds.length + ' sounds' : ''} · ${p.bars} bar${p.bars > 1 ? 's' : ''}${p.muted ? ' · muted' : ''}${S.solo && S.solo.includes(i) ? ' · solo' : ''}</small></button>`).join('')
+    + (S.parts.length ? `<button class="part" data-cmd="record next part"><b>+ Part ${S.parts.length + 1}</b><small>say "record part ${S.parts.length + 1}"</small></button>` : '');
 }
-function drawGrid(ph) {
-  const g = $('grid');
-  if (!S.pattern) { g.innerHTML = '<div class="empty">Your beat shows up here once you record one.</div>'; return; }
-  let html = '';
-  for (let b = 0; b < S.pattern.length / 16; b++) {
-    html += '<div>' + S.sounds.map((s, si) => `<div class="bar"><span class="lab" style="color:${COLORS[si % 6]}">${si + 1}</span>` +
-      Array.from({ length: 16 }, (_, j) => { const i = b * 16 + j, v = S.pattern[i][si]; return `<span class="c${j % 4 ? '' : ' beat'}${i === ph ? ' ph' : ''}" style="${v ? `background:${COLORS[si % 6]};opacity:${s.muted ? .25 : .4 + v * .6}` : ''}"></span>`; }).join('') + '</div>').join('') + '</div>';
+function drawPanel(ph) {
+  const el = $('panel'), p = curPart();
+  if (!p) { el.innerHTML = '<div class="empty">Your parts show up here. Start with "record part 1", then beatbox, hum or whistle.</div>'; return; }
+  const head = `<h2>Part ${S.cur + 1}: ${esc(partName(p))}${p.kind === 'melody' && p.key ? ' · ' + keyName(p.key) + (p.snapOn ? '' : ' (exact notes)') : ''}</h2>`;
+  if (p.kind === 'drums') {
+    let html = head + '<div class="sounds">' + p.sounds.map((s, i) => `<button class="snd${s.muted ? ' muted' : ''}" data-snd="${i}"><span class="dot" style="background:${COLORS[i % 6]}">${i + 1}</span><span><b>Sound ${i + 1}: ${esc(sndName(s))}</b><small>${s.muted ? 'muted · ' : ''}${s.type ? (s.style ? STYLES[s.style].name + ' · ' : '') : (s.guess ? 'a bit like a ' + NAMES[s.guess] + ' · ' : '')}tap to hear</small></span></button>`).join('') + '</div><div class="grid">';
+    for (let b = 0; b < p.len / 16; b++) html += '<div>' + p.sounds.map((s, si) => `<div class="bar"><span class="lab" style="color:${COLORS[si % 6]}">${si + 1}</span>` + Array.from({ length: 16 }, (_, j) => { const i = b * 16 + j, v = p.pattern[i] && p.pattern[i][si]; return `<span class="c${j % 4 ? '' : ' beat'}${i === ph ? ' ph' : ''}" style="${v ? `background:${COLORS[si % 6]};opacity:${s.muted ? .25 : .4 + v * .6}` : ''}"></span>`; }).join('') + '</div>').join('') + '</div>';
+    el.innerHTML = html + '</div>'; return;
   }
-  g.innerHTML = html;
+  if (!p.notes.length) { el.innerHTML = head + '<div class="empty">No notes in this part.</div>'; return; }
+  const ms = p.notes.map(n => n.midi), lo = Math.min(...ms) - 2, hi = Math.max(...ms) + 2, rows = hi - lo + 1, W = p.len * 10, H = rows * 10, col = COLORS[S.cur % 6];
+  let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`;
+  for (let s = 0; s < p.len; s += 4) svg += `<rect x="${s * 10}" y="0" width="${s % 16 ? .6 : 1.6}" height="${H}" fill="currentColor" opacity=".15"/>`;
+  for (const n of p.notes) svg += `<rect x="${n.step * 10 + .5}" y="${(hi - n.midi) * 10 + 1}" width="${Math.max(4, n.len * 10 - 1)}" height="8" rx="2" fill="${col}" opacity="${.45 + n.vel * .55}"/>`;
+  if (ph >= 0) svg += `<rect x="${ph * 10}" y="0" width="10" height="${H}" fill="${'#1a9b5a'}" opacity=".25"/>`;
+  el.innerHTML = head + `<div class="roll">${svg}</svg></div>`;
 }
 function drawChips() {
-  const items = [['Tempo', S.bpm + ' BPM'], ['Length', S.pattern ? S.bars + (S.bars > 1 ? ' bars' : ' bar') : 'none yet'], ['Style', STYLES[S.style].name], ['Swing', S.swing ? 'on' : 'off']];
+  const items = [['Tempo', S.bpm + ' BPM'], ['Drum style', STYLES[S.style].name], ['Swing', S.swing ? 'on' : 'off'], ['Timing offset', Math.round((S.latency || 0) * 1000) + ' ms']];
   $('chips').innerHTML = items.map(([a, b]) => `<span class="chip">${a}: <b>${b}</b></span>`).join('');
 }
-$('sounds').addEventListener('click', e => { const b = e.target.closest('[data-snd]'); if (b && ctx) audition(+b.dataset.snd); });
-document.querySelectorAll('[data-cmd]').forEach(b => b.addEventListener('click', () => { if (!ctx) return; if (S.busy && b.dataset.cmd === 'stop') { S.stopRec = true; return; } handle(b.dataset.cmd); }));
+$('panel').addEventListener('click', e => { const b = e.target.closest('[data-snd]'); if (b && ctx && curPart()) audition(curPart(), +b.dataset.snd); });
+$('parts').addEventListener('click', e => { const b = e.target.closest('[data-part]'); if (b) { S.cur = +b.dataset.part; drawAll(); } });
+document.addEventListener('click', e => { const b = e.target.closest('[data-cmd]'); if (!b || !ctx) return; if (S.busy && b.dataset.cmd === 'stop') { S.stopRec = true; return; } handle(b.dataset.cmd); });
 $('go').addEventListener('click', async () => {
-  try { initAudio(); await ctx.resume(); await openMic(); closeMic(); $('gate').remove(); startListen(); setStatus(); }
+  try { initAudio(); await ctx.resume(); await openMic(); closeMic(); $('gate').remove(); startListen(); setStatus(); drawChips(); }
   catch (err) { $('gateMsg').textContent = 'The microphone was blocked: ' + (err.message || err) + '. Allow it in the browser\'s site settings and tap again.'; }
 });
 $('tapResume').addEventListener('click', tapResume);
