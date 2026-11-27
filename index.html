@@ -106,7 +106,9 @@ button:focus-visible{outline:3px solid var(--red);outline-offset:2px}
       <h3>Drum parts</h3>
       <ul class="cmds">
         <li><em>"Sound 1 is a kick"</em> / <em>"Make sound 2 a deep boomy 808 kick"</em> / <em>"Make the snare crunchy"</em> / <em>"Make them drums"</em></li>
-        <li><em>"Mute sound 3"</em> / <em>"Merge sound 3 into sound 1"</em> / <em>"Sound 2 back to my voice"</em> / <em>"Make it techno"</em></li>
+        <li><em>"Split more"</em> / <em>"Split less"</em> / <em>"Split into 5 sounds"</em>: re-splits the same recording. Drums you've already picked stay.</li>
+        <li><em>"Combine sound 1 and sound 3"</em> / <em>"Combine sounds 2, 4 and 5"</em> / <em>"Record part 1 with 4 sounds"</em></li>
+        <li><em>"Mute sound 3"</em> / <em>"Sound 2 back to my voice"</em> / <em>"Make it techno"</em></li>
       </ul>
       <h3>Melody parts</h3>
       <ul class="cmds">
@@ -308,7 +310,7 @@ const DSP = (() => {
   }
   // hits: [{time, type, level}] absolute seconds. Returns {pat, bpm, bars, used}
   function freestyle(hits, fallbackBpm, forceBpm) {
-    hits = hits.slice().sort((a, b) => a.time - b.time);
+    hits = hits.map((h, i) => ({ ...h, _i: i })).sort((a, b) => a.time - b.time);
     if (!hits.length) return { pat: null, bpm: fallbackBpm, bars: 0, used: 0, grid: [] };
     const t0 = hits[0].time - 0.3, last = hits[hits.length - 1].time;
     let bpm = fallbackBpm, beats;
@@ -334,7 +336,7 @@ const DSP = (() => {
       while (hi - lo > 1) { const m = (lo + hi) >> 1; if (grid[m] <= h.time) lo = m; else hi = m; }
       const idx = Math.abs(grid[lo] - h.time) <= Math.abs(grid[hi] - h.time) ? lo : hi;
       if (idx === 0 && h.time < grid[0] - (grid[1] - grid[0])) continue;
-      placed.push([idx, h.type, Math.round((0.45 + 0.55 * Math.min(1, h.level / maxL)) * 100) / 100]);
+      placed.push([idx, h.type, Math.round((0.45 + 0.55 * Math.min(1, h.level / maxL)) * 100) / 100, h._i]);
     }
     let bars = Math.max(1, Math.ceil((Math.max(...placed.map(p => p[0])) + 1) / 16));
     // a lone hit on the first step of a final bar is usually the "landing", not a new bar
@@ -343,7 +345,8 @@ const DSP = (() => {
     const pat = Array.from({ length: bars * 16 }, () => ({}));
     let used = 0;
     for (const [i, t, v] of placed) if (i < pat.length) { if (v > (pat[i][t] || 0)) pat[i][t] = v; used++; }
-    return { pat, bpm: Math.round(60 / med), bars, used, grid };
+    const steps = new Array(hits.length).fill(-1); for (const p of placed) if (p[0] < bars * 16) steps[p[3]] = p[0];
+    return { pat, bpm: Math.round(60 / med), bars, used, grid, steps };
   }
 
   /* ---- sound grouping: split hits into however many distinct mouth sounds ---- */
@@ -478,7 +481,91 @@ const DSP = (() => {
     return best;
   }
 
-  return { pitchTrack, notesFrom, findKey, snap, detectOnsets, features, classify, analyze, quantize, trainMean, beatOffset, freestyle, groupSounds, analyzeSounds };
+
+  /* ---- detailed sound grouping (v2): many traits per hit + a family tree of groups ---- */
+  const E16 = Array.from({ length: 17 }, (_, i) => 40 * Math.pow(16000 / 40, i / 16));
+  function bandShape(p, bin, edges) {
+    const nb = edges.length - 1, b = new Array(nb).fill(1e-12);
+    for (let i = 1; i < p.length; i++) { const f = i * bin; if (f < edges[0] || f >= edges[nb]) continue; let j = 0; while (f >= edges[j + 1]) j++; b[j] += p[i]; }
+    const db = b.map(v => 10 * Math.log10(v)), m = db.reduce((a, c) => a + c) / nb;
+    return db.map(v => (v - m) / 10);
+  }
+  function hitVec(x, sr, t, nextT) {
+    const s0 = Math.round(t * sr) - Math.round(.008 * sr), maxLen = Math.round(Math.min(.3, nextT ? Math.max(.04, nextT - t) : .3) * sr);
+    // envelope in 5ms steps
+    const w = Math.round(sr * .005), env = [];
+    for (let k = 0; k * w < maxLen; k++) { let e = 0; for (let i = 0; i < w; i++) { const v = x[s0 + k * w + i] || 0; e += v * v; } env.push(Math.sqrt(e / w)); }
+    const pk = Math.max(...env.slice(0, 12)), pi = env.indexOf(pk);
+    // attack at 1ms resolution, smoothed: time from 20% to 90% of the peak
+    const w1 = Math.round(sr * .001), e1 = [];
+    for (let k = 0; k < 50; k++) { let e = 0; for (let i = 0; i < w1 * 2; i++) { const v = x[s0 + k * w1 + i] || 0; e += v * v; } e1.push(Math.sqrt(e / (w1 * 2))); }
+    const p1k = Math.max(...e1); let a20 = 0, a90 = 0;
+    for (let k = 0; k < e1.length; k++) if (e1[k] >= p1k * .2) { a20 = k; break; }
+    for (let k = a20; k < e1.length; k++) if (e1[k] >= p1k * .9) { a90 = k; break; }
+    const attack = a90 - a20 + 1;                                         // ms
+    let dec = env.length * 5; for (let k = pi; k < env.length; k++) if (env[k] < pk * .1) { dec = (k - pi) * 5; break; }
+    // spectra: the hit's start and its tail
+    const N = 2048, bin = sr / N, p1 = power(x, s0, N), p2 = power(x, s0 + Math.round(.045 * sr), N);
+    const sh1 = bandShape(p1, bin, E16), sh2 = bandShape(p2, bin, EDGES);
+    let tot = 0, cen = 0, lg = 0, cnt = 0;
+    for (let i = 1; i < p1.length; i++) { const f = i * bin; tot += p1[i]; cen += f * p1[i]; if (f > 300 && f < 12000) { lg += Math.log(p1[i] + 1e-14); cnt++; } }
+    let ar = 0; for (let i = 1; i < p1.length; i++) { const f = i * bin; if (f > 300 && f < 12000) ar += p1[i]; }
+    const flat = Math.exp(lg / cnt) / (ar / cnt + 1e-14);                // 0 tonal .. 1 noisy
+    let zc = 0; const zn = Math.round(.03 * sr); for (let i = 1; i < zn; i++) if ((x[s0 + i] || 0) * (x[s0 + i - 1] || 0) < 0) zc++;
+    // pitchiness: best normalised autocorrelation (70-1000 Hz) on a decimated copy
+    const D = Math.max(1, Math.round(sr / 12000)), fs = sr / D, L = 600, y = new Float32Array(L + 200);
+    for (let i = 0; i < y.length; i++) { let a = 0; for (let j = 0; j < D; j++) a += x[s0 + (i * D) + j] || 0; y[i] = a / D; }
+    let best = 0; const lo = Math.floor(fs / 1000), hi = Math.min(199, Math.ceil(fs / 70));
+    let e0 = 0; for (let i = 0; i < L; i++) e0 += y[i] * y[i];
+    for (let lag = lo; lag <= hi; lag++) { let c = 0, e1 = 0; for (let i = 0; i < L; i++) { c += y[i] * y[i + lag]; e1 += y[i + lag] * y[i + lag]; } const r = c / Math.sqrt(e0 * e1 + 1e-14); if (r > best) best = r; }
+    return { shape: sh1, tail: sh2, scal: [Math.log2(attack + 1) * .7, Math.log2(Math.max(5, dec)), Math.log2(Math.max(50, cen / (tot || 1e-12))), flat * 3, Math.log2(zc + 1), best * 3] };
+  }
+  // standardise each trait, weight the groups, flatten
+  function prepVecs(hv) {
+    const rows = hv.map(h => [...h.shape.map(v => v * .55), ...h.tail.map(v => v * .45), ...h.scal]);
+    const n = rows.length, D = rows[0].length, mu = [], sd = [];
+    for (let d = 0; d < D; d++) { mu[d] = rows.reduce((a, r) => a + r[d], 0) / n; sd[d] = Math.sqrt(rows.reduce((a, r) => a + (r[d] - mu[d]) ** 2, 0) / n); }
+    const nShape = hv[0].shape.length + hv[0].tail.length;
+    // shapes keep a shared scale so quiet bands don't get blown up; scalars are z-scored
+    let shSd = 0; for (let d = 0; d < nShape; d++) shSd += sd[d] / nShape; shSd = Math.max(.15, shSd);
+    return rows.map(r => r.map((v, d) => d < nShape ? (v - mu[d]) / shSd * .45 : (v - mu[d]) / Math.max(.25, sd[d])));
+  }
+  function buildTree(V) {
+    const n = V.length, D = [], size = new Array(n).fill(1), alive = new Array(n).fill(true), merges = [];
+    for (let i = 0; i < n; i++) { D[i] = new Float64Array(n); for (let j = 0; j < n; j++) D[i][j] = Math.sqrt(dist2(V[i], V[j])); }
+    const nn = []; for (let i = 0; i < n; i++) { let m = Infinity; for (let j = 0; j < n; j++) if (j !== i) m = Math.min(m, D[i][j]); nn.push(m); }
+    for (let step = 0; step < n - 1; step++) {
+      let a = -1, b = -1, h = Infinity;
+      for (let i = 0; i < n; i++) if (alive[i]) for (let j = i + 1; j < n; j++) if (alive[j] && D[i][j] < h) { h = D[i][j]; a = i; b = j; }
+      for (let k = 0; k < n; k++) if (alive[k] && k !== a && k !== b) D[a][k] = D[k][a] = (size[a] * D[a][k] + size[b] * D[b][k]) / (size[a] + size[b]);
+      size[a] += size[b]; alive[b] = false; merges.push({ a, b, h });
+    }
+    return { n, merges, nnMed: nn.length ? med(nn) : 0 };
+  }
+  function cutTree(tree, k) {
+    const par = Array.from({ length: tree.n }, (_, i) => i), find = i => par[i] === i ? i : (par[i] = find(par[i]));
+    for (let i = 0; i < tree.n - k; i++) { const m = tree.merges[i]; par[find(m.b)] = find(m.a); }
+    const order = [], L = [];
+    for (let i = 0; i < tree.n; i++) { const r = find(i); if (!order.includes(r)) order.push(r); L.push(order.indexOf(r)); }
+    return L;
+  }
+  const MAXK = 8;
+  function defaultK(tree) {
+    if (tree.n <= 1) return tree.n;
+    const T = Math.max(1.6, tree.nnMed * 2.6);
+    let k = tree.n - tree.merges.filter(m => m.h <= T).length;
+    return Math.max(1, Math.min(MAXK, k));
+  }
+  function analyzeSounds2(x, sr, model, keep) {
+    const on = detectOnsets(x, sr).filter(o => !keep || keep(o.t)).slice(0, 300);
+    const hits = on.map((o, i) => ({ ...o, guess: classify(features(x, sr, o.t), model), hv: hitVec(x, sr, o.t, on[i + 1] && on[i + 1].t) }));
+    if (!hits.length) return { hits, tree: null, k: 0 };
+    const tree = buildTree(prepVecs(hits.map(h => h.hv)));
+    hits.forEach(h => delete h.hv);
+    return { hits, tree, k: defaultK(tree) };
+  }
+
+  return { analyzeSounds2, cutTree, defaultK, MAXK, pitchTrack, notesFrom, findKey, snap, detectOnsets, features, classify, analyze, quantize, trainMean, beatOffset, freestyle, groupSounds, analyzeSounds };
 })();
 
 
@@ -487,7 +574,7 @@ const DSP = (() => {
 {
 const $ = id => document.getElementById(id);
 const store = { get(k, d) { try { const v = localStorage.getItem('vds_' + k); return v ? JSON.parse(v) : d; } catch { return d; } }, set(k, v) { try { localStorage.setItem('vds_' + k, JSON.stringify(v)); } catch {} } };
-const COLORS = ['#e4002b', '#2a6df4', '#1a9b5a', '#d98200', '#8a3ffc', '#0a9fb0'];
+const COLORS = ['#e4002b', '#2a6df4', '#1a9b5a', '#d98200', '#8a3ffc', '#0a9fb0', '#c2255c', '#7a828c'];
 const NAMES = { kick: 'kick', snare: 'snare', clap: 'clap', hat: 'hi-hat', openhat: 'open hi-hat', tom: 'tom', rim: 'rimshot', cymbal: 'crash', cowbell: 'cowbell', shaker: 'shaker' };
 const MNAMES = { guitar: 'guitar', piano: 'piano', flute: 'flute', strings: 'strings', synth: 'synth', bass: 'bass', organ: 'organ', marimba: 'marimba', bell: 'bells', brass: 'trumpet', sax: 'sax', pad: 'pad', choir: 'choir', whistle: 'whistle' };
 const KEYN = ['C', 'C#', 'D', 'Eb', 'E', 'F', 'F#', 'G', 'Ab', 'A', 'Bb', 'B'];
@@ -519,7 +606,7 @@ const DESC = [
 const INST_WORDS = [[/open ?(hi|high)? ?hats?/, 'openhat'], [/(hi|high) ?hats?|\bhats?\b|closed hat/, 'hat'], [/kicks?\b|bass drum|\bkik/, 'kick'], [/snares?|snair/, 'snare'], [/claps?\b|clapping/, 'clap'], [/\btoms?\b|floor tom/, 'tom'], [/rim ?shot|\brim\b|side ?stick|\bstick/, 'rim'], [/crash|cymbal|\bride\b|splash/, 'cymbal'], [/cowbell/, 'cowbell'], [/shaker|maraca|tambourine|\bshake/, 'shaker']];
 const MEL_WORDS = [[/guitar|ukulele|banjo|harp/, 'guitar'], [/piano|keys|keyboard/, 'piano'], [/flute|recorder/, 'flute'], [/violin|strings|cello|viola|orchestra|fiddle/, 'strings'], [/synth|synthesizer|\blead\b/, 'synth'], [/\bbass\b(?! drum)/, 'bass'], [/organ/, 'organ'], [/marimba|xylophone|vibraphone|kalimba|steel drum/, 'marimba'], [/(?<!cow)bells?\b|chimes?|music box|glockenspiel/, 'bell'], [/trumpet|horn|brass|trombone|tuba/, 'brass'], [/\bsax|saxophone|clarinet|oboe/, 'sax'], [/\bpads?\b|ambient|atmospher/, 'pad'], [/choir|voices|ooh|aah/, 'choir'], [/whistle|sine wave|pure tone/, 'whistle']];
 const NUM = { one: 1, won: 1, first: 1, two: 2, to: 2, too: 2, second: 2, three: 3, tree: 3, third: 3, four: 4, for: 4, fourth: 4, five: 5, fifth: 5, six: 6, sixth: 6, seven: 7, eight: 8, ten: 10, twelve: 12, sixteen: 16, once: 1, twice: 2 };
-const NUMW = '(\\d+|one|won|two|to|too|three|tree|four|for|five|six)';
+const NUMW = '(\\d+|one|won|two|to|too|three|tree|four|for|five|six|seven|eight)';
 
 const S = { bpm: store.get('bpm', 100), style: store.get('style', 'acoustic'), swing: false, latency: store.get('latency', null), parts: [], cur: 0, solo: null, hist: [], busy: false, stopRec: false };
 let ctx, bus, comp, revSend, noiseBuf, micStream = null, rec = null, wantListen = false;
@@ -713,7 +800,7 @@ async function record(o) {
     const total = chunks.reduce((a, c) => a + c.length, 0), x = new Float32Array(total); let off = 0; for (const c of chunks) { x.set(c, off); off += c.length; }
     if (o.calibrate) finishCalibrate(x, first, T0, beat);
     else {
-      const r = processTake(x, ctx.sampleRate, first, { overdub, startAt, T0, kind: o.kind, bars: o.bars, lat: S.latency, base: S.parts.find((_, i) => i !== o.target) });
+      const r = processTake(x, ctx.sampleRate, first, { overdub, startAt, T0, kind: o.kind, bars: o.bars, k: o.k, lat: S.latency, base: S.parts.find((_, i) => i !== o.target) });
       pushHist();
       if (r.bpm) { S.bpm = r.bpm; store.set('bpm', S.bpm); }
       S.parts[o.target] = r.part; S.cur = o.target; S.solo = null;
@@ -749,21 +836,22 @@ function processTake(x, sr, first, o) {
   const sd = stepDur(), from = o.overdub ? o.T0 - sd / 2 : o.startAt + .08;
   const part = newPart(kind); let bpm = null, toStep, origin;
   if (kind === 'drums') {
-    let hits = DSP.analyzeSounds(x, sr, null).filter(h => first + h.t > from);
-    if (!hits.length) throw new Error('quiet');
-    const order = []; hits.forEach(h => { if (!order.includes(h.type)) order.push(h.type); }); hits.forEach(h => h.type = order.indexOf(h.type));
-    part.sounds = makeClips(x, sr, hits, order.length);
-    const abs = hits.map(h => ({ time: first + h.t, type: h.type, level: h.level }));
+    const an = DSP.analyzeSounds2(x, sr, null, t => first + t > from);
+    if (!an.hits.length) throw new Error('quiet');
+    const abs = an.hits.map(h => ({ time: first + h.t, type: 0, level: h.level })), maxL = Math.max(...abs.map(h => h.level));
+    let steps;
     if (!o.overdub) {
       const r = DSP.freestyle(abs, S.bpm); if (!r.pat) throw new Error('quiet');
-      part.pattern = r.pat; part.bars = r.bars; bpm = r.bpm; part.hits = abs;
+      steps = r.steps; part.bars = r.bars; bpm = r.bpm; part.hits = abs;
     } else {
-      const maxL = Math.max(...abs.map(h => h.level)), placed = abs.map(h => [Math.max(0, Math.round((h.time - o.T0 - o.lat) / sd)), h.type, Math.round((.45 + .55 * h.level / maxL) * 100) / 100]);
-      const mx = Math.max(...placed.map(p => p[0])), lastBar = Math.floor(mx / 16);
-      part.bars = o.bars || fitBars(mx, o.base, placed.filter(p => p[0] >= lastBar * 16).every(p => p[0] % 16 === 0) && mx % 16 === 0);
-      part.pattern = Array.from({ length: part.bars * 16 }, () => ({}));
-      for (const [i, ty, v] of placed) if (i < part.pattern.length && v > (part.pattern[i][ty] || 0)) part.pattern[i][ty] = v;
+      steps = abs.map(h => Math.max(0, Math.round((h.time - o.T0 - o.lat) / sd)));
+      const mx = Math.max(...steps), lastBar = Math.floor(mx / 16);
+      part.bars = o.bars || fitBars(mx, o.base, steps.filter(v => v >= lastBar * 16).every(v => v % 16 === 0) && mx % 16 === 0);
     }
+    part.len = part.bars * 16;
+    part.rec = { x, sr, tree: an.tree, len: part.len, hits: an.hits.map((h, i) => ({ t: h.t, level: h.level, guess: h.guess, step: steps[i] < part.len ? steps[i] : -1, vel: Math.round((.45 + .55 * h.level / maxL) * 100) / 100 })) };
+    part.shift = 0;
+    regroup(part, o.k || an.k);
   } else {
     const notes = DSP.notesFrom(tr).map(n => ({ ...n, start: first + n.start, end: first + n.end })).filter(n => n.start > from);
     if (!notes.length) throw new Error('quiet');
@@ -788,6 +876,26 @@ function processTake(x, sr, first, o) {
   part.len = part.bars * 16;
   if (part.kind === 'drums' && part.pattern.length < part.len) while (part.pattern.length < part.len) part.pattern.push({});
   return { part, bpm };
+}
+// split a drum part's hits into k sounds, keeping any drums you already picked
+function regroup(p, k) {
+  const R = p.rec; k = Math.max(1, Math.min(DSP.MAXK, R.hits.length, k));
+  const L = DSP.cutTree(R.tree, k), old = p.labels, oldSounds = p.sounds || [];
+  const added = oldSounds.filter(s => !s.clip), addedCols = added.map(s => (p.pattern || []).map(q => q[s.id]));
+  const hits = R.hits.map((h, i) => ({ ...h, type: L[i] }));
+  const sounds = makeClips(R.x, R.sr, hits, k);
+  if (old) {
+    // each sound you already set up goes to the one new group that overlaps it most
+    const pairs = [];
+    oldSounds.forEach((os, j) => { if (!os.clip || !(os.type || os.muted || os.vol !== 1)) return; const cnt = new Array(k).fill(0); L.forEach((l, i) => { if (old[i] === j) cnt[l]++; }); cnt.forEach((c, g) => { const size = L.filter(l => l === g).length; if (c && c / size >= .5) pairs.push([c, j, g]); }); });
+    pairs.sort((a, b) => b[0] - a[0]); const usedO = new Set(), usedN = new Set();
+    for (const [, j, g] of pairs) { if (usedO.has(j) || usedN.has(g)) continue; usedO.add(j); usedN.add(g); const os = oldSounds[j]; Object.assign(sounds[g], { type: os.type, mods: { ...os.mods }, label: os.label, style: os.style, vol: os.vol, muted: os.muted }); }
+  }
+  const base = Array.from({ length: R.len }, () => ({}));
+  hits.forEach(h => { if (h.step >= 0 && h.step < R.len && h.vel > (base[h.step][h.type] || 0)) base[h.step][h.type] = h.vel; });
+  const sh = p.shift || 0, pat = Array.from({ length: p.len }, (_, i) => ({ ...base[((i - sh) % R.len + R.len) % R.len] }));
+  added.forEach((s, j) => { const id = sounds.length; sounds.push({ ...s, id }); addedCols[j].forEach((v, i) => { if (v && i < p.len) pat[i][id] = v; }); });
+  p.sounds = sounds; p.pattern = pat; p.labels = L; p.k = k;
 }
 function resnap(p) { p.notes = p.raw.filter(n => n.step < p.len).map(n => ({ step: n.step, len: n.len, vel: n.vel, midi: p.snapOn ? DSP.snap(n.m, p.key) : Math.round(n.m) })); }
 function makeClips(x, sr, hits, k) {
@@ -834,7 +942,7 @@ function tapResume() { needTap = false; $('tapResume').hidden = true; wantListen
 function num(str) { const m = str.match(/\b(\d+)\b/); if (m) return +m[1]; for (const w of str.split(/\s+/)) if (NUM[w]) return NUM[w]; return null; }
 const refNum = w => (/\d/.test(w) ? +w : NUM[w]) - 1;
 function pushHist() {
-  S.hist.push({ parts: S.parts.map(p => ({ ...p, mods: { ...p.mods }, sounds: p.sounds.map(s => ({ ...s, mods: { ...s.mods } })), pattern: JSON.parse(JSON.stringify(p.pattern)), notes: p.notes.map(n => ({ ...n })), raw: p.raw && p.raw.map(n => ({ ...n })), hits: p.hits && p.hits.map(h => ({ ...h })) })), cur: S.cur, solo: S.solo, bpm: S.bpm, style: S.style });
+  S.hist.push({ parts: S.parts.map(p => ({ ...p, mods: { ...p.mods }, sounds: p.sounds.map(s => ({ ...s, mods: { ...s.mods } })), pattern: JSON.parse(JSON.stringify(p.pattern)), notes: p.notes.map(n => ({ ...n })), raw: p.raw && p.raw.map(n => ({ ...n })), labels: p.labels && p.labels.slice(), hits: p.hits && p.hits.map(h => ({ ...h })) })), cur: S.cur, solo: S.solo, bpm: S.bpm, style: S.style });
   if (S.hist.length > 40) S.hist.shift();
 }
 const inst = t => { for (const [r, k] of INST_WORDS) if (r.test(t)) return k; return null; };
@@ -868,7 +976,8 @@ function interpret(t) {
     const kind = /melody|hum|whistle|tune|sing|song|bass ?line|riff|chords?|harmony|lead/.test(t) ? 'melody' : /\b(beat|drums?|beatbox|rhythm|percussion|groove)\b/.test(t) ? 'drums' : null;
     const bm = t.match(new RegExp(NUMW + ' (?:bars?|measures?)')), bars = bm ? Math.max(1, Math.min(32, refNum(bm[1]) + 1)) : null;
     const alone = /\b(alone|by itself|on its own|without|no other|nothing (else )?playing|no music|just (the |a )?click|in silence|solo)\b/.test(t);
-    record({ target, alone, kind, bars, withIdx: w && w.length ? w : null });
+    const km = t.match(new RegExp(NUMW + ' (?:different |separate )?sounds\\b')), k = km ? Math.max(1, refNum(km[1]) + 1) : null;
+    record({ target, alone, kind, bars, k, withIdx: w && w.length ? w : null });
     return `Recording part ${target + 1}${alone ? ' with just a click' : w && w.length ? ' over part ' + w.map(x => x + 1).join(' and ') : S.parts.some((_, k) => k !== target) ? ' over the other parts' : ''}`;
   }
   if (/\b(stop|pause|quiet|silence|shut up|enough)\b/.test(t) && pr == null && sr == null) { stopPlay(); return 'Stopped'; }
@@ -898,7 +1007,7 @@ function interpret(t) {
   let target = pr != null ? pr : S.cur;
   const tp = S.parts[target];
   if (pr == null && tp) {
-    if ((sr != null || di || /\b(make|turn) (them|it|everything|all)( all)? (into )?drums\b/.test(t)) && tp.kind !== 'drums' && !mi) { const k = lastOf('drums'); if (k >= 0) target = k; }
+    if ((sr != null || di || /\b(make|turn) (them|it|everything|all)( all)? (into )?drums\b|\b(split|separate|divide|simplif)|(more|fewer|less) sounds|\bsounds\b/.test(t)) && tp.kind !== 'drums' && !mi) { const k = lastOf('drums'); if (k >= 0) target = k; }
     else if ((mi || /snap|auto ?tune|exact notes|octave|my voice|\bhum\b|in key/.test(t)) && sr == null && tp.kind !== 'melody') { const k = lastOf('melody'); if (k >= 0) target = k; }
   }
   const p = S.parts[target];
@@ -916,7 +1025,7 @@ function interpret(t) {
   if (/\b(slower|slow down)\b/.test(t)) { S.bpm = Math.max(40, S.bpm - 10); return `Tempo ${S.bpm} BPM`; }
   if (/half ?time|half speed|double ?time|double speed/.test(t)) {
     const half = /half/.test(t), p0 = S.parts[0];
-    if (S.parts.length === 1 && p0.kind === 'drums' && p0.hits) { const r = DSP.freestyle(p0.hits, S.bpm, half ? Math.max(40, S.bpm / 2) : Math.min(220, S.bpm * 2)); pushHist(); p0.pattern = r.pat; p0.bars = r.bars; p0.len = r.bars * 16; S.bpm = r.bpm; play(2); return `Re-read at ${half ? 'half' : 'double'} time: ${S.bpm} BPM`; }
+    if (S.parts.length === 1 && p0.kind === 'drums' && p0.hits && p0.rec) { const r = DSP.freestyle(p0.hits, S.bpm, half ? Math.max(40, S.bpm / 2) : Math.min(220, S.bpm * 2)); pushHist(); p0.bars = r.bars; p0.len = r.bars * 16; p0.rec = { ...p0.rec, len: p0.len, hits: p0.rec.hits.map((h, i) => ({ ...h, step: r.steps[i] })) }; p0.shift = 0; regroup(p0, p0.k); S.bpm = r.bpm; play(2); return `Re-read at ${half ? 'half' : 'double'} time: ${S.bpm} BPM`; }
     pushHist(); S.bpm = Math.round(half ? Math.max(40, S.bpm / 2) : Math.min(220, S.bpm * 2)); return `Tempo ${S.bpm} BPM`;
   }
   if (/no swing|straight|remove (the )?swing/.test(t)) { S.swing = false; return 'Swing off'; }
@@ -926,7 +1035,7 @@ function interpret(t) {
 }
 const noPart = k => `There's no part ${k + 1} yet. There ${S.parts.length === 1 ? 'is 1 part' : 'are ' + S.parts.length + ' parts'}.`;
 function nudge(p, dir) {
-  if (p.kind === 'drums') { if (dir < 0) p.pattern.push(p.pattern.shift()); else p.pattern.unshift(p.pattern.pop()); }
+  if (p.kind === 'drums') { p.shift = (p.shift || 0) + dir; if (dir < 0) p.pattern.push(p.pattern.shift()); else p.pattern.unshift(p.pattern.pop()); }
   else { p.raw.forEach(n => n.step = (n.step + dir + p.len) % p.len); resnap(p); }
 }
 function resize(p, nb) {
@@ -961,6 +1070,7 @@ function melodyCmd(t, p, k) {
   return mi ? `${tag} is now ${p.label || 'a ' + MNAMES[mi]}${p.mods.oct ? ', octave ' + (p.mods.oct > 0 ? 'up' : 'down') : ''}` : (p.inst ? `${tag} reshaped` : `${tag} reshaped. Pick an instrument too, like "make it a flute".`);
 }
 function drumCmd(t, p, k) {
+  const sp = splitCmd(t, p, k); if (sp) return sp;
   const b = barsCmd(t, p, k); if (b) return b;
   if (/\b(make|turn) (them|it|everything|all)( all)? (into )?(drums|real drums)|auto ?drums|\bauto\b/.test(t)) {
     pushHist(); const used = new Set();
@@ -977,9 +1087,31 @@ function drumCmd(t, p, k) {
   if (sid == null) return null;
   return soundCmd(t, p, sid);
 }
+function splitCmd(t, p, k) {
+  const nm = t.match(new RegExp('\\b(?:split|separate|break|divide|group|sort)\\b.*?\\b(?:into|in|to)\\s+' + NUMW + '\\s+(?:different |separate )?(?:sounds?|groups?|pieces?)')) || t.match(new RegExp('^(?:make it |use |give me )?' + NUMW + ' (?:different |separate )?sounds$'));
+  const less = /\b(split|separate)\b.*\bless\b|\b(fewer|less) sounds|simplif|group (it |them )?(together )?more|combine more/.test(t);
+  const more = !less && (/\b(split|separate|divide|break)\b.*\b(more|further|again|finer|apart)\b|more (detail|sounds|separat)|split (it|them|the sounds)( up)?$|^split$/.test(t));
+  if (!nm && !less && !more) return null;
+  if (!p.rec) return `Part ${k + 1} has no recording to split`;
+  const n = p.rec.hits.length, cur = p.sounds.filter(s => s.clip).length;
+  let want = nm ? refNum(nm[1]) + 1 : cur + (more ? 1 : -1);
+  want = Math.max(1, Math.min(DSP.MAXK, n, want));
+  if (want === cur && !nm) return more ? `Part ${k + 1} is already split as far as it goes (${cur} sounds)` : `Part ${k + 1} is down to 1 sound`;
+  pushHist(); regroup(p, want); if (!P.on) play(2);
+  return `Part ${k + 1} now has ${want} sound${want > 1 ? 's' : ''}${want >= Math.min(DSP.MAXK, n) ? ' (that\'s the most)' : ''}`;
+}
 function soundCmd(t, p, sid) {
   const s = p.sounds[sid]; if (!s) return `There's no sound ${sid + 1}. That part has ${p.sounds.length}.`;
-  if (/merge|same as|combine|join/.test(t)) { const nums = [...t.matchAll(new RegExp(SREF.source, 'g'))].map(x => refNum(x[1])); if (nums.length < 2) return 'Say which two, like "merge sound 3 into sound 1"'; return merge(p, nums[0], nums[1]); }
+  if (/merge|same as|combine|join|put together|group/.test(t)) {
+    const tt = t.replace(/\b(sounds?|noise) (to|too)\b/g, '$1 2').replace(/\b(sounds?|noise) for\b/g, '$1 4'), at = tt.search(/\b(sounds?|noise|sample)\b/);
+    const nums = [...new Set([...tt.slice(at).matchAll(/\b(\d+|one|won|two|three|tree|four|five|six|seven|eight)\b/g)].map(x => refNum(x[1])))];
+    if (nums.length < 2) return 'Say which ones, like "combine sound 1 and sound 3"';
+    let into = /\b(into|onto|in with|same as)\b/.test(tt) ? nums[nums.length - 1] : Math.min(...nums);
+    const from = nums.filter(x => x !== into).sort((a, b) => b - a);
+    if (from.some(x => !p.sounds[x]) || !p.sounds[into]) return `Part has ${p.sounds.length} sounds, so I can't find all of those`;
+    pushHist(); for (const f of from) { merge(p, f, into, true); if (f < into) into--; }
+    return `Combined into sound ${into + 1}. Part now has ${p.sounds.length} sound${p.sounds.length > 1 ? 's' : ''}.`;
+  }
   if (/\b(unmute|bring back|turn on)\b/.test(t)) { pushHist(); s.muted = false; return `Sound ${sid + 1} is back`; }
   if (/\b(mute|remove|delete|drop|get rid|turn off|kill)\b/.test(t)) { pushHist(); s.muted = true; return `Sound ${sid + 1} muted. Say "bring back sound ${sid + 1}" to undo.`; }
   if (/\b(louder|turn up|boost|volume up)\b/.test(t)) { pushHist(); s.vol = Math.min(3, s.vol * 1.4); return `Sound ${sid + 1} louder`; }
@@ -999,15 +1131,14 @@ function soundCmd(t, p, sid) {
   S.hist.pop();
   return `What should sound ${sid + 1} be? Try "sound ${sid + 1} is a kick".`;
 }
-function merge(p, from, into) {
+function merge(p, from, into, noHist) {
   if (!p.sounds[from] || !p.sounds[into] || from === into) return 'Those need to be two different sounds';
-  pushHist();
+  if (!noHist) pushHist();
   p.pattern.forEach(q => { if (q[from]) q[into] = Math.max(q[into] || 0, q[from]); delete q[from]; });
-  if (p.hits) p.hits.forEach(h => { if (h.type === from) h.type = into; });
   const keep = p.sounds.filter((_, i) => i !== from), map = {}; p.sounds.forEach((s, i) => { if (i !== from) map[i] = keep.indexOf(s); });
   p.pattern = p.pattern.map(q => { const o = {}; for (const kk in q) o[map[kk]] = q[kk]; return o; });
-  if (p.hits) p.hits.forEach(h => h.type = map[h.type]);
-  keep.forEach((s, i) => s.id = i); p.sounds = keep;
+  if (p.labels) p.labels = p.labels.map(l => l === from ? map[into] : map[l]);
+  keep.forEach((s, i) => s.id = i); p.sounds = keep; p.k = keep.filter(s => s.clip).length;
   return `Merged. Now ${keep.length} sound${keep.length > 1 ? 's' : ''}.`;
 }
 
@@ -1023,7 +1154,7 @@ function setStatus(a, b) {
 const esc = v => String(v).replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 function drawAll() { drawParts(); drawPanel(-1); drawChips(); }
 function drawParts() {
-  $('parts').innerHTML = S.parts.map((p, i) => `<button class="part${i === S.cur ? ' cur' : ''}${p.muted ? ' muted' : ''}" data-part="${i}"><b><span class="tag" style="background:${COLORS[i % 6]}"></span>Part ${i + 1}</b><small>${esc(partName(p))}${p.kind === 'drums' ? ' · ' + p.sounds.length + ' sounds' : ''} · ${p.bars} bar${p.bars > 1 ? 's' : ''}${p.muted ? ' · muted' : ''}${S.solo && S.solo.includes(i) ? ' · solo' : ''}</small></button>`).join('')
+  $('parts').innerHTML = S.parts.map((p, i) => `<button class="part${i === S.cur ? ' cur' : ''}${p.muted ? ' muted' : ''}" data-part="${i}"><b><span class="tag" style="background:${COLORS[i % COLORS.length]}"></span>Part ${i + 1}</b><small>${esc(partName(p))}${p.kind === 'drums' ? ' · ' + p.sounds.length + ' sounds' : ''} · ${p.bars} bar${p.bars > 1 ? 's' : ''}${p.muted ? ' · muted' : ''}${S.solo && S.solo.includes(i) ? ' · solo' : ''}</small></button>`).join('')
     + (S.parts.length ? `<button class="part" data-cmd="record next part"><b>+ Part ${S.parts.length + 1}</b><small>say "record part ${S.parts.length + 1}"</small></button>` : '');
 }
 function drawPanel(ph) {
@@ -1031,12 +1162,12 @@ function drawPanel(ph) {
   if (!p) { el.innerHTML = '<div class="empty">Your parts show up here. Start with "record part 1", then beatbox, hum or whistle.</div>'; return; }
   const head = `<h2>Part ${S.cur + 1}: ${esc(partName(p))}${p.kind === 'melody' && p.key ? ' · ' + keyName(p.key) + (p.snapOn ? '' : ' (exact notes)') : ''}</h2>`;
   if (p.kind === 'drums') {
-    let html = head + '<div class="sounds">' + p.sounds.map((s, i) => `<button class="snd${s.muted ? ' muted' : ''}" data-snd="${i}"><span class="dot" style="background:${COLORS[i % 6]}">${i + 1}</span><span><b>Sound ${i + 1}: ${esc(sndName(s))}</b><small>${s.muted ? 'muted · ' : ''}${s.type ? (s.style ? STYLES[s.style].name + ' · ' : '') : (s.guess ? 'a bit like a ' + NAMES[s.guess] + ' · ' : '')}tap to hear</small></span></button>`).join('') + '</div><div class="grid">';
-    for (let b = 0; b < p.len / 16; b++) html += '<div>' + p.sounds.map((s, si) => `<div class="bar"><span class="lab" style="color:${COLORS[si % 6]}">${si + 1}</span>` + Array.from({ length: 16 }, (_, j) => { const i = b * 16 + j, v = p.pattern[i] && p.pattern[i][si]; return `<span class="c${j % 4 ? '' : ' beat'}${i === ph ? ' ph' : ''}" style="${v ? `background:${COLORS[si % 6]};opacity:${s.muted ? .25 : .4 + v * .6}` : ''}"></span>`; }).join('') + '</div>').join('') + '</div>';
+    let html = head + '<div class="sounds">' + p.sounds.map((s, i) => `<button class="snd${s.muted ? ' muted' : ''}" data-snd="${i}"><span class="dot" style="background:${COLORS[i % COLORS.length]}">${i + 1}</span><span><b>Sound ${i + 1}: ${esc(sndName(s))}</b><small>${s.muted ? 'muted · ' : ''}${s.type ? (s.style ? STYLES[s.style].name + ' · ' : '') : (s.guess ? 'a bit like a ' + NAMES[s.guess] + ' · ' : '')}tap to hear</small></span></button>`).join('') + '</div><div class="grid">';
+    for (let b = 0; b < p.len / 16; b++) html += '<div>' + p.sounds.map((s, si) => `<div class="bar"><span class="lab" style="color:${COLORS[si % COLORS.length]}">${si + 1}</span>` + Array.from({ length: 16 }, (_, j) => { const i = b * 16 + j, v = p.pattern[i] && p.pattern[i][si]; return `<span class="c${j % 4 ? '' : ' beat'}${i === ph ? ' ph' : ''}" style="${v ? `background:${COLORS[si % COLORS.length]};opacity:${s.muted ? .25 : .4 + v * .6}` : ''}"></span>`; }).join('') + '</div>').join('') + '</div>';
     el.innerHTML = html + '</div>'; return;
   }
   if (!p.notes.length) { el.innerHTML = head + '<div class="empty">No notes in this part.</div>'; return; }
-  const ms = p.notes.map(n => n.midi), lo = Math.min(...ms) - 2, hi = Math.max(...ms) + 2, rows = hi - lo + 1, W = p.len * 10, H = rows * 10, col = COLORS[S.cur % 6];
+  const ms = p.notes.map(n => n.midi), lo = Math.min(...ms) - 2, hi = Math.max(...ms) + 2, rows = hi - lo + 1, W = p.len * 10, H = rows * 10, col = COLORS[S.cur % COLORS.length];
   let svg = `<svg viewBox="0 0 ${W} ${H}" preserveAspectRatio="none">`;
   for (let s = 0; s < p.len; s += 4) svg += `<rect x="${s * 10}" y="0" width="${s % 16 ? .6 : 1.6}" height="${H}" fill="currentColor" opacity=".15"/>`;
   for (const n of p.notes) svg += `<rect x="${n.step * 10 + .5}" y="${(hi - n.midi) * 10 + 1}" width="${Math.max(4, n.len * 10 - 1)}" height="8" rx="2" fill="${col}" opacity="${.45 + n.vel * .55}"/>`;
