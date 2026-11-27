@@ -21,6 +21,7 @@ h1{font-size:20px;font-stretch:112%;font-weight:800;margin:0 0 18px;display:flex
 .light.listen{background:#1a9b5a}
 #status{font-size:clamp(30px,6vw,48px);line-height:1.05;font-weight:800;font-stretch:112%;margin:0 0 6px;text-wrap:balance}
 #sub{color:var(--mute);margin:0 0 22px;font-size:17px}
+.meter{height:10px;border-radius:5px;background:var(--cell);margin:-8px 0 22px;overflow:hidden}.meter span{display:block;height:100%;width:0;background:var(--red);transition:width .05s}
 .grid{display:grid;gap:14px;margin-bottom:22px}
 .bar{display:grid;grid-template-columns:44px repeat(16,minmax(0,1fr));gap:3px;align-items:center}
 .lab{font-size:13px;color:var(--mute);font-weight:600}
@@ -62,6 +63,7 @@ button:focus-visible{outline:3px solid var(--red);outline-offset:2px}
   <h1><span class="light" id="light"></span>Voice Drum Studio</h1>
   <p id="status">Say "record a beat"</p>
   <p id="sub">Listening for commands.</p>
+  <div class="meter" id="meterWrap" hidden><span id="meter"></span></div>
   <div class="grid" id="grid"></div>
   <div class="chips" id="chips"></div>
   <div class="heard"><p class="q" id="heardQ">Nothing heard yet</p><p class="a" id="heardA">Try "record a beat", then "make it techno".</p></div>
@@ -69,10 +71,13 @@ button:focus-visible{outline:3px solid var(--red);outline-offset:2px}
     <div>
       <h2>Things you can say</h2>
       <ul class="cmds">
-        <li><em>"Record a beat"</em>: four clicks count you in, then beatbox for the set number of bars</li>
+        <li><em>"Record a beat"</em>: after the beep, freestyle as long as you like. Go quiet for 2 seconds to finish, and it works out the tempo and bars.</li>
+        <li><em>"Record with a click"</em>: four clicks count you in at the set tempo, for a fixed number of bars</li>
         <li><em>"Play it"</em> / <em>"Loop it 4 times"</em> / <em>"Stop"</em></li>
         <li><em>"Make it techno"</em>: also trap, 808, house, lo-fi, rock, real or acoustic</li>
-        <li><em>"Tempo 120"</em> / <em>"Faster"</em> / <em>"Slower"</em> / <em>"Four bars"</em></li>
+        <li><em>"Make it 4 bars"</em>: repeats or trims your beat to fit</li>
+        <li><em>"Half time"</em> / <em>"Double time"</em>: if it guessed your tempo twice too fast or slow</li>
+        <li><em>"Tempo 120"</em> / <em>"Faster"</em> / <em>"Slower"</em></li>
         <li><em>"Add hi-hats"</em> / <em>"Remove snares"</em> / <em>"Double it"</em> / <em>"Add swing"</em></li>
         <li><em>"Undo"</em> / <em>"Clear"</em> / <em>"Click off"</em></li>
         <li><em>"Teach kick"</em> (also snare, hi-hat): do that sound four times so it learns your mouth</li>
@@ -84,7 +89,8 @@ button:focus-visible{outline:3px solid var(--red);outline-offset:2px}
       <div class="btns"><button data-cmd="record a beat">Record</button><button data-cmd="play">Play</button><button data-cmd="stop">Stop</button><button data-cmd="undo">Undo</button></div>
       <div class="tips">
         <p>Beatbox sounds: <b>"b" / "boom"</b> for kick, <b>"k" / "pf"</b> for snare, <b>"ts"</b> for hi-hat. Wrong drums? Say "teach kick", "teach snare" and "teach hi-hat" once each.</p>
-        <p>Best in Chrome on a computer. Voice commands need Chrome or Edge, and Safari works partly.</p>
+        <p>If it misses hits, beatbox a bit closer to the mic and watch the red level bar while you record.</p>
+        <p>Best in Chrome. Voice commands need Chrome or Edge, and Safari works partly.</p>
         <p id="srWarn"></p>
       </div>
     </div>
@@ -144,7 +150,7 @@ const DSP = (() => {
       for (let i = 1; i < p.length; i++) { m[i] = Math.log1p(1000 * Math.sqrt(p[i])); if (prev) { const d = m[i] - prev[i]; if (d > 0) fl += d; } }
       flux[f] = prev ? fl : 0; prev = m;
     }
-    const gate = Math.max(peakRms * Math.pow(10, -32 / 20), 0.002);
+    const gate = Math.max(peakRms * Math.pow(10, -34 / 20), 0.0008);
     let meanFlux = 0; for (let f = 0; f < frames; f++) meanFlux += flux[f]; meanFlux /= Math.max(1, frames);
     const out = []; let last = -1e9;
     for (let f = 1; f < frames - 1; f++) {
@@ -223,7 +229,87 @@ const DSP = (() => {
     return offs.length ? offs[Math.floor(offs.length / 2)] : 0;
   }
 
-  return { detectOnsets, features, classify, analyze, quantize, trainMean, beatOffset };
+  /* ---- freestyle: tempo + beat tracking + quantize to a flexible grid ---- */
+  const FR = 200; // envelope frames per second
+  function envelope(hits, t0, dur) {
+    const n = Math.ceil(dur * FR) + 1, e = new Float64Array(n), sig = 0.022 * FR;
+    const maxL = Math.max(1e-9, ...hits.map(h => h.level));
+    for (const h of hits) {
+      const c = (h.time - t0) * FR, w = (h.type === 'h' ? .6 : 1) * (.5 + .5 * h.level / maxL);
+      for (let i = Math.max(0, Math.floor(c - 3 * sig)); i <= Math.min(n - 1, Math.ceil(c + 3 * sig)); i++) e[i] += w * Math.exp(-0.5 * ((i - c) / sig) ** 2);
+    }
+    return e;
+  }
+  function estimateTempo(e) {
+    let best = 100, bs = -1;
+    for (let bpm = 60; bpm <= 180; bpm += 0.5) {
+      const lag = 60 / bpm * FR, L = Math.floor(lag), fr = lag - L;
+      let ac = 0;
+      for (let i = 0; i + L + 1 < e.length; i++) ac += e[i] * (e[i + L] * (1 - fr) + e[i + L + 1] * fr);
+      // also reward the bar-level and half-beat repetitions
+      const L2 = Math.round(lag * 2); let ac2 = 0; for (let i = 0; i + L2 < e.length; i++) ac2 += e[i] * e[i + L2];
+      const prior = Math.exp(-0.5 * (Math.log2(bpm / 105) / 0.8) ** 2);
+      const s = (ac + 0.5 * ac2) * prior;
+      if (s > bs) { bs = s; best = bpm; }
+    }
+    return best;
+  }
+  function trackBeats(e, bpm, lastFrame) {
+    const p = 60 / bpm * FR, n = e.length, score = new Float64Array(n), back = new Int32Array(n).fill(-1);
+    let sd = 0, mu = 0; for (const v of e) mu += v / n; for (const v of e) sd += (v - mu) ** 2 / n; sd = Math.sqrt(sd) || 1;
+    const lo = Math.round(p / 2), hi = Math.round(p * 2), tight = 100;
+    for (let t = 0; t < n; t++) {
+      let best = -Infinity, bi = -1;
+      for (let tau = t - hi; tau <= t - lo; tau++) { if (tau < 0) continue; const v = score[tau] - tight * Math.log((t - tau) / p) ** 2; if (v > best) { best = v; bi = tau; } }
+      const o = e[t] / sd;
+      if (best > 0) { score[t] = o + best; back[t] = bi; } else score[t] = o;
+    }
+    let end = 0, bs = -Infinity;
+    for (let t = Math.max(0, Math.round(lastFrame - p * .5)); t <= Math.min(n - 1, Math.round(lastFrame + p * .25)); t++) if (score[t] > bs) { bs = score[t]; end = t; }
+    const beats = []; for (let t = end; t >= 0; t = back[t]) beats.unshift(t / FR);
+    return beats;
+  }
+  // hits: [{time, type, level}] absolute seconds. Returns {pat, bpm, bars, used}
+  function freestyle(hits, fallbackBpm, forceBpm) {
+    hits = hits.slice().sort((a, b) => a.time - b.time);
+    if (!hits.length) return { pat: null, bpm: fallbackBpm, bars: 0, used: 0 };
+    const t0 = hits[0].time - 0.3, last = hits[hits.length - 1].time;
+    let bpm = fallbackBpm, beats;
+    if (hits.length >= 4) {
+      const e = envelope(hits, t0, last - t0 + 1.2);
+      bpm = forceBpm || estimateTempo(e);
+      beats = trackBeats(e, bpm, (last - t0) * FR).map(b => b + t0);
+    }
+    const period = 60 / bpm;
+    if (!beats || beats.length < 2) beats = [hits[0].time];
+    // the beat nearest the first hit is "1"
+    let fi = 0; for (let i = 0; i < beats.length; i++) if (Math.abs(beats[i] - hits[0].time) < Math.abs(beats[fi] - hits[0].time)) fi = i;
+    beats = beats.slice(fi);
+    // smooth out wobble: if tracked beats drift oddly, fall back toward an even grid
+    const ints = []; for (let i = 1; i < beats.length; i++) ints.push(beats[i] - beats[i - 1]);
+    const med = ints.length ? ints.slice().sort((a, b) => a - b)[Math.floor(ints.length / 2)] : period;
+    while (beats[beats.length - 1] < last + med * 4) beats.push(beats[beats.length - 1] + med);
+    const grid = [];
+    for (let i = 0; i + 1 < beats.length; i++) { const d = (beats[i + 1] - beats[i]) / 4; for (let k = 0; k < 4; k++) grid.push(beats[i] + k * d); }
+    const maxL = Math.max(1e-9, ...hits.map(h => h.level)), placed = [];
+    for (const h of hits) {
+      let lo = 0, hi = grid.length - 1;
+      while (hi - lo > 1) { const m = (lo + hi) >> 1; if (grid[m] <= h.time) lo = m; else hi = m; }
+      const idx = Math.abs(grid[lo] - h.time) <= Math.abs(grid[hi] - h.time) ? lo : hi;
+      if (idx === 0 && h.time < grid[0] - (grid[1] - grid[0])) continue;
+      placed.push([idx, h.type, Math.round((0.45 + 0.55 * Math.min(1, h.level / maxL)) * 100) / 100]);
+    }
+    let bars = Math.max(1, Math.ceil((Math.max(...placed.map(p => p[0])) + 1) / 16));
+    // a lone hit on the first step of a final bar is usually the "landing", not a new bar
+    const lastBar = placed.filter(p => p[0] >= (bars - 1) * 16);
+    if (bars > 1 && lastBar.every(p => p[0] === (bars - 1) * 16)) bars--;
+    const pat = Array.from({ length: bars * 16 }, () => ({ k: 0, s: 0, h: 0 }));
+    let used = 0;
+    for (const [i, t, v] of placed) if (i < pat.length) { if (v > pat[i][t]) pat[i][t] = v; used++; }
+    return { pat, bpm: Math.round(60 / med), bars, used };
+  }
+
+  return { detectOnsets, features, classify, analyze, quantize, trainMean, beatOffset, freestyle };
 })();
 
 
@@ -243,7 +329,7 @@ const KITS = {
 const KIT_WORDS = [[/techno|industrial|rave|berlin/, 'techno'], [/trap|808|hip ?hop|drill/, 'trap'], [/lo ?-?fi|chill|jazz|dusty|vintage/, 'lofi'], [/house|disco|dance|club/, 'house'], [/acoustic|real|rock|live|natural|normal/, 'acoustic']];
 const NUM = { one: 1, two: 2, to: 2, too: 2, three: 3, four: 4, for: 4, five: 5, six: 6, eight: 8, ten: 10, sixteen: 16, once: 1, twice: 2 };
 
-const S = { bpm: store.get('bpm', 100), bars: store.get('bars', 2), kit: store.get('kit', 'acoustic'), swing: false, click: true, latency: store.get('latency', 0.03), model: store.get('model', {}), pattern: null, hist: [], busy: false };
+const S = { bpm: store.get('bpm', 100), bars: store.get('bars', 2), kit: store.get('kit', 'acoustic'), swing: false, click: true, latency: store.get('latency', 0.03), model: store.get('model', {}), pattern: null, lastHits: null, stopRec: false, hist: [], busy: false };
 
 let ctx, bus, lp, shaper, comp, revSend, noiseBuf, micStream = null;
 let rec = null, wantListen = false;
@@ -333,7 +419,7 @@ function drawHead() {
 /* ---------- recording ---------- */
 const wait = ms => new Promise(r => setTimeout(r, ms));
 async function openMic() {
-  micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: false, autoGainControl: false } });
+  micStream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
 }
 function closeMic() { if (micStream) micStream.getTracks().forEach(t => t.stop()); micStream = null; }
 
@@ -345,7 +431,8 @@ async function capture(mode) {
     const src = ctx.createMediaStreamSource(micStream), proc = ctx.createScriptProcessor(2048, 1, 1), sink = ctx.createGain();
     sink.gain.value = 0; src.connect(proc); proc.connect(sink); sink.connect(ctx.destination);
     const chunks = []; let first = null;
-    proc.onaudioprocess = e => { if (first === null) first = ctx.currentTime - e.inputBuffer.duration; chunks.push(new Float32Array(e.inputBuffer.getChannelData(0))); };
+    proc.onaudioprocess = e => { if (first === null) first = ctx.currentTime - e.inputBuffer.duration; const d = new Float32Array(e.inputBuffer.getChannelData(0)); chunks.push(d); onLevel(d); };
+    if (mode === 'free') { await freeCapture(src, proc, sink, chunks, () => first, v => first = v); return; }
     const beat = 60 / S.bpm, train = mode.length === 1;
     const bars = mode === 'beat' ? S.bars : mode === 'calibrate' ? 2 : 0;
     const t0 = ctx.currentTime + .35, gridStart = t0 + 4 * beat;
@@ -370,7 +457,47 @@ async function capture(mode) {
   } catch (err) {
     closeMic(); say('Couldn\'t use the microphone', String(err.message || err)); chirp(false);
   }
-  S.busy = false; $('light').className = 'light'; resumeListen(); setStatus();
+  S.busy = false; $('meterWrap').hidden = true; $('light').className = 'light'; resumeListen(); setStatus();
+}
+let levelCb = null;
+function onLevel(d) {
+  let e = 0; for (let i = 0; i < d.length; i++) e += d[i] * d[i]; const rms = Math.sqrt(e / d.length);
+  $('meter').style.width = Math.min(100, Math.sqrt(rms * 12) * 100) + '%';
+  if (levelCb) levelCb(rms);
+}
+async function freeCapture(src, proc, sink, chunks, getFirst) {
+  $('meterWrap').hidden = false; S.stopRec = false;
+  const startAt = ctx.currentTime + .25; click(startAt, true);
+  let floor = 1, n = 0, peak = 0, started = false, lastLoud = 0;
+  levelCb = rms => {
+    const now = ctx.currentTime; if (now < startAt + .1) return;
+    if (n < 6) { floor = Math.min(floor, rms); n++; return; }
+    peak = Math.max(peak, rms);
+    const thr = Math.max(floor * 3, 0.002, peak * 0.05);
+    if (rms > thr) { started = true; lastLoud = now; }
+  };
+  const maxEnd = startAt + 60;
+  while (true) {
+    const now = ctx.currentTime;
+    if (S.stopRec || now > maxEnd || (started && now - lastLoud > 2)) break;
+    if (!started && now > startAt + 15) break;
+    setStatus(started ? 'Recording… go quiet to finish' : (now < startAt ? 'Get ready…' : 'Go! Beatbox whenever you\'re ready'), started ? 'Freestyle as long as you like. 2 seconds of quiet ends it.' : 'Waiting to hear you…');
+    await wait(50);
+  }
+  levelCb = null; proc.disconnect(); src.disconnect(); closeMic();
+  const total = chunks.reduce((a, c) => a + c.length, 0), x = new Float32Array(total); let o = 0; for (const c of chunks) { x.set(c, o); o += c.length; }
+  const first = getFirst();
+  const hits = DSP.analyze(x, ctx.sampleRate, S.model).map(h => ({ ...h, time: first + h.t })).filter(h => h.time > startAt + .08);
+  S.lastHits = hits.map(h => ({ time: h.time, type: h.type, level: h.level }));
+  buildFree(null);
+}
+function buildFree(forceBpm) {
+  const r = DSP.freestyle(S.lastHits || [], S.bpm, forceBpm);
+  if (!r.pat || !r.used) { say('I didn\'t hear a beat', 'Get closer to the mic and say "record a beat" again.'); chirp(false); return; }
+  pushHist(); S.pattern = r.pat; S.bpm = r.bpm; S.bars = r.bars; store.set('bpm', S.bpm); drawGrid(-1); drawChips();
+  const c = t => r.pat.filter(p => p[t]).length;
+  say(`${r.bpm} BPM, ${r.bars} bar${r.bars > 1 ? 's' : ''}: ${c('k')} kicks, ${c('s')} snares, ${c('h')} hi-hats`, 'Playing it back. Say "make it 4 bars", "half time", "make it techno", or "record a beat" to redo.');
+  chirp(true); play(0);
 }
 function finishCapture(mode, hits, gridStart, beat) {
   if (mode === 'calibrate') {
@@ -424,7 +551,9 @@ function interpret(t) {
   let m, i;
   if (/\b(teach|train|learn)\b/.test(t) && (i = inst(t))) { capture(i); return 'Teaching mode'; }
   if (/calibrat|fix (the )?timing/.test(t)) { capture('calibrate'); return 'Calibrating timing'; }
-  if (/\b(record|new beat|take|redo|again from scratch)\b/.test(t)) { capture('beat'); return 'Recording: count-in starting'; }
+  if (/\b(record|new beat|take|redo)\b/.test(t)) { if (/click|metronome|count/.test(t)) { capture('beat'); return 'Recording with a count-in'; } capture('free'); return 'Recording: freestyle after the beep'; }
+  if (/half ?time|half speed|too fast/.test(t)) { if (!S.lastHits) return 'Record a freestyle beat first'; buildFree(Math.max(40, S.bpm / 2)); return 'Re-read at half time'; }
+  if (/double ?time|double speed|too slow/.test(t)) { if (!S.lastHits) return 'Record a freestyle beat first'; buildFree(Math.min(220, S.bpm * 2)); return 'Re-read at double time'; }
   if (/\b(stop|pause|quiet|silence|shut up|enough)\b/.test(t)) { stopPlay(); return 'Stopped'; }
   if (/\bundo\b|go back/.test(t)) { if (!S.hist.length) return 'Nothing to undo'; S.pattern = JSON.parse(S.hist.pop()); drawGrid(-1); return 'Undone'; }
   if (/\b(clear|start over|delete everything|wipe)\b/.test(t)) { pushHist(); S.pattern = null; stopPlay(); drawGrid(-1); return 'Cleared'; }
@@ -434,7 +563,11 @@ function interpret(t) {
   if (/\b(faster|speed up|quicker)\b/.test(t)) { S.bpm = Math.min(200, S.bpm + 10); store.set('bpm', S.bpm); return `Tempo ${S.bpm} BPM`; }
   if (/\b(slower|slow down)\b/.test(t)) { S.bpm = Math.max(50, S.bpm - 10); store.set('bpm', S.bpm); return `Tempo ${S.bpm} BPM`; }
   if (/\bdouble (it|the)\b|twice as long/.test(t)) { if (!S.pattern) return 'Nothing to double yet'; pushHist(); S.pattern = S.pattern.concat(JSON.parse(JSON.stringify(S.pattern))); drawGrid(-1); return `Doubled to ${S.pattern.length / 16} bars`; }
-  if (/\bbars?\b/.test(t) && (m = num(t))) { S.bars = [1, 2, 4, 8].includes(m) ? m : 2; store.set('bars', S.bars); return `Next recording will be ${S.bars} bar${S.bars > 1 ? 's' : ''}`; }
+  if (/\b(bars?|measures?)\b/.test(t) && (m = num(t))) {
+    const nb = Math.max(1, Math.min(16, m));
+    if (!S.pattern) { S.bars = nb; store.set('bars', nb); return `Click recordings will be ${nb} bar${nb > 1 ? 's' : ''}`; }
+    pushHist(); const old = S.pattern, len = nb * 16; S.pattern = Array.from({ length: len }, (_, i) => ({ ...old[i % old.length] })); S.bars = nb; drawGrid(-1); if (!P.on) play(0);
+    return `Now ${nb} bar${nb > 1 ? 's' : ''}${len > old.length ? ', repeating your beat to fill it' : len < old.length ? ', trimmed' : ''}`; }
   if (/no swing|straight|remove (the )?swing/.test(t)) { S.swing = false; return 'Swing off'; }
   if (/swing|shuffle|groove/.test(t)) { S.swing = true; return 'Swing on'; }
   if (/(click|metronome)/.test(t)) { S.click = !/off|no|stop|without/.test(t); return `Click during recording ${S.click ? 'on' : 'off'}`; }
@@ -470,10 +603,10 @@ function drawGrid(ph) {
   g.innerHTML = html;
 }
 function drawChips() {
-  const items = [['Kit', KITS[S.kit].name], ['Tempo', S.bpm + ' BPM'], ['Record length', S.bars + (S.bars > 1 ? ' bars' : ' bar')], ['Swing', S.swing ? 'on' : 'off'], ['Click', S.click ? 'on' : 'off'], ['Taught sounds', ['k', 's', 'h'].filter(k => S.model[k]).length + ' of 3']];
+  const items = [['Kit', KITS[S.kit].name], ['Tempo', S.bpm + ' BPM'], ['Length', S.bars + (S.bars > 1 ? ' bars' : ' bar')], ['Swing', S.swing ? 'on' : 'off'], ['Click', S.click ? 'on' : 'off'], ['Taught sounds', ['k', 's', 'h'].filter(k => S.model[k]).length + ' of 3']];
   $('chips').innerHTML = items.map(([a, b]) => `<span class="chip">${a}: <b>${b}</b></span>`).join('');
 }
-document.querySelectorAll('[data-cmd]').forEach(b => b.addEventListener('click', () => { if (!ctx) return; handle(b.dataset.cmd); }));
+document.querySelectorAll('[data-cmd]').forEach(b => b.addEventListener('click', () => { if (!ctx) return; if (S.busy && b.dataset.cmd === 'stop') { S.stopRec = true; return; } handle(b.dataset.cmd); }));
 $('go').addEventListener('click', async () => {
   try {
     initAudio(); await ctx.resume(); await openMic(); closeMic();
